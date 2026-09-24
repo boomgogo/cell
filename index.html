@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f4ec" />
+    <meta name="description" content="bac — bacteria eat bacteria, on a sphere." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='9' cy='9' r='5.5' fill='%23ff665e'/%3E%3Ccircle cx='7.5' cy='7.5' r='5.5' fill='none' stroke='%23241f1c' stroke-width='1.8'/%3E%3C/svg%3E" />
+    <title>bac</title>
+    <style>
+      /* Risograph print: paper, one key colour for text and outlines, flat spot inks, offset shadows. */
+      :root { --paper: #f7f4ec; --key: #241f1c; --coral: #ff665e; --amber: #ffc846; --emerald: #00a98f; --navy: #173f7a; --purple: #7b4fbf; --pink: #f28ec0; }
+      body.dark { --paper: #1b1a17; --key: #f7f4ec; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper); overscroll-behavior: none; }
+      body { font: 16px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif; color: var(--key); -webkit-user-select: none; user-select: none; }
+      #game { position: fixed; inset: 0; display: block; touch-action: none; cursor: default; background: var(--paper); }
+      [hidden] { display: none !important; }
+      .box { background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; box-shadow: 3px 3px 0 var(--emerald); }
+      #score { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); padding: 2px 8px; font-weight: 800; font-size: 20px; pointer-events: none; box-shadow: 3px 3px 0 var(--coral); }
+      #leaderboard { position: fixed; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); width: 240px; padding: 8px 12px 10px; pointer-events: none; box-shadow: 4px 4px 0 var(--amber); }
+      #leaderboard h2 { margin: 0 0 6px; font-size: 15px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; text-align: center; border-bottom: 2px solid var(--key); padding-bottom: 4px; }
+      #lb { margin: 0; padding: 0; list-style: none; font-weight: 700; font-size: 15px; }
+      #lb li { display: flex; gap: 6px; white-space: nowrap; padding: 0 3px; }
+      #lb .rk { flex: none; min-width: 1.7em; font-variant-numeric: tabular-nums; }
+      #lb .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      #lb .ms { flex: none; font-variant-numeric: tabular-nums; }
+      #lb li.me { background: var(--coral); color: #241f1c; }
+      #menu { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--paper) 55%, transparent); }
+      .panel { width: min(340px, 100%); padding: 20px; background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; box-shadow: 6px 6px 0 var(--navy); text-align: center; }
+      .panel h1 { margin: 0; font-size: 52px; font-weight: 900; letter-spacing: 2px; text-shadow: 3px 2px 0 var(--coral); }
+      .tag { margin: 2px 0 14px; opacity: 0.75; }
+      #play-form { display: flex; flex-direction: column; gap: 10px; }
+      #nick { font: inherit; padding: 10px 12px; background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; }
+      #play { font: inherit; font-weight: 800; letter-spacing: 1px; padding: 10px; border: 2px solid var(--key); border-radius: 2px; background: var(--coral); color: #241f1c; cursor: pointer; box-shadow: 3px 3px 0 var(--key); }
+      #play:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--key); }
+      .help { margin: 12px 0 0; font-size: 13px; opacity: 0.75; }
+      #death { margin: 12px 0 0; font-weight: 800; color: var(--key); background: var(--pink); padding: 4px 6px; }
+      #touch { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); display: flex; gap: 14px; }
+      #touch button { width: 72px; height: 72px; border-radius: 50%; border: 2px solid var(--key); background: color-mix(in srgb, var(--paper) 80%, transparent); color: var(--key); font: 800 16px system-ui, sans-serif; touch-action: none; box-shadow: 3px 3px 0 var(--emerald); }
+      #touch #btn-split { width: 88px; height: 88px; box-shadow: 3px 3px 0 var(--coral); }
+      #arcade-hud { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 44px); padding: 4px 10px; font: 700 15px/1.35 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; pointer-events: none; letter-spacing: 0.5px; box-shadow: 3px 3px 0 var(--purple); }
+      #arcade-hud .pts { font-size: 20px; font-weight: 800; }
+      #arcade-hud .sub { font-size: 12px; opacity: 0.75; }
+      #power { height: 6px; margin-top: 4px; border: 1px solid var(--key); overflow: hidden; }
+      #power i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #ff665e 0 16.6%, #ffc846 0 33.3%, #3fa34d 0 50%, #00a98f 0 66.6%, #6a8fe6 0 83.3%, #7b4fbf 0); background-size: 200px 100%; }
+      #banner { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); padding: 4px 14px; font: 700 15px ui-monospace, Menlo, Consolas, monospace; letter-spacing: 1px; pointer-events: none; text-align: center; white-space: nowrap; box-shadow: 3px 3px 0 var(--amber); }
+      #banner small { display: block; font-size: 11px; opacity: 0.75; letter-spacing: 0.5px; }
+      #toast { position: fixed; left: 50%; top: 32%; transform: translate(-50%, -50%); font: 900 34px ui-monospace, Menlo, Consolas, monospace; color: var(--key); text-shadow: 3px 3px 0 var(--coral); pointer-events: none; white-space: nowrap; letter-spacing: 2px; }
+      #minimap { position: fixed; left: max(10px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); width: 96px; height: 96px; border-radius: 50%; cursor: pointer; touch-action: manipulation; filter: drop-shadow(3px 3px 0 var(--emerald)); }
+      #minimap.large { width: 240px; height: 240px; }
+      #mute { position: fixed; left: calc(max(10px, env(safe-area-inset-left)) + 100px); top: max(10px, env(safe-area-inset-top)); width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--key); background: var(--paper); color: var(--key); font-size: 16px; cursor: pointer; }
+      #home-arrow { position: fixed; left: 0; top: 0; width: 44px; height: 44px; margin: -22px 0 0 -22px; pointer-events: none; color: var(--key); font: 700 11px ui-monospace, Menlo, monospace; text-align: center; }
+      #home-arrow span { display: block; font-size: 22px; line-height: 22px; text-shadow: 2px 2px 0 var(--coral); }
+      #home-arrow b { display: block; background: var(--paper); }
+      #debug-panel { position: fixed; left: 8px; top: 8px; padding: 8px 10px; background: rgba(0, 0, 0, 0.7); color: #fff; font: 12px/1.5 ui-monospace, monospace; border-radius: 6px; display: flex; flex-direction: column; gap: 2px; max-width: calc(100vw - 32px); }
+      #debug-panel pre { margin: 4px 0 0; }
+      @media (max-width: 560px) {
+        #leaderboard { width: 168px; padding: 4px 8px 6px; }
+        #leaderboard h2 { font-size: 11px; letter-spacing: 2px; }
+        #lb { font-size: 12px; }
+        #score { font-size: 16px; }
+        #minimap { width: 72px; height: 72px; }
+        #minimap.large { width: 200px; height: 200px; }
+        #mute { left: calc(max(10px, env(safe-area-inset-left)) + 76px); width: 30px; height: 30px; }
+        #banner { left: max(10px, env(safe-area-inset-left)); transform: none; top: calc(max(10px, env(safe-area-inset-top)) + 80px); font-size: 11px; text-align: left; padding: 3px 8px; }
+        #banner small { font-size: 10px; }
+        #toast { font-size: 24px; }
+        #arcade-hud { font-size: 12px; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 34px); }
+        #arcade-hud .pts { font-size: 15px; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="score" class="box" hidden>Score: 0</div>
+    <div id="arcade-hud" class="box" hidden><div class="pts" id="points">0</div><div class="sub" id="hiscore">HI 0</div><div class="sub" id="laps" hidden></div><div id="power" hidden><i></i></div></div>
+    <div id="banner" class="box" hidden></div>
+    <div id="toast" hidden></div>
+    <canvas id="minimap" hidden></canvas>
+    <button id="mute" hidden aria-label="Mute">♪</button>
+    <div id="home-arrow" hidden><span>▲</span><b></b></div>
+    <div id="leaderboard" class="box"><h2>Leaderboard</h2><ol id="lb"></ol></div>
+    <div id="touch" hidden><button id="btn-eject" aria-label="Eject mass">W</button><button id="btn-split" aria-label="Split">Split</button></div>
+    <div id="menu">
+      <div class="panel">
+        <h1>bac</h1>
+        <p class="tag">bacteria eat bacteria — on a sphere</p>
+        <form id="play-form">
+          <input id="nick" maxlength="15" placeholder="Rad" autocomplete="off" spellcheck="false" />
+          <button id="play" type="submit">Play</button>
+        </form>
+        <p class="help">Steer with mouse or finger · <b>Space</b> split · <b>W</b> eject</p>
+        <p class="help" id="arcade-help" hidden>Rainbow spores in the mazes let you explode bigger cells · find your way home</p>
+        <p id="death" hidden></p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

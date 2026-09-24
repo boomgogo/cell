@@ -146,3 +146,7 @@ vite.config.ts.timestamp-*
 test-results/
 playwright-report/
 .playwright-mcp/
+
+# wrangler
+.wrangler/
+.dev.vars*

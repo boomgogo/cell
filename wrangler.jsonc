@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cell",
+  "compatibility_date": "2026-09-24",
+  // Static-only Worker: no script, Cloudflare serves dist/ from its edge.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }, 
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  }
+}

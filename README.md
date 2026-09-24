@@ -37,11 +37,27 @@ npm run dev
 | `npm run dev` | Vite dev server |
 | `npm run build` | Typecheck + production build into `dist/` (static site) |
 | `npm run preview` | Serve `dist/` |
+| `npm run preview:cf` | Build, then serve `dist/` through the local Cloudflare runtime (`wrangler dev`) |
+| `npm run deploy` | Build, then deploy to Cloudflare Workers (`wrangler deploy`) |
 | `npm test` | Unit tests (Vitest): sphere math, rules, mechanics, virus pop pieces, lap test, NPC arena smoke test, big NPCs keep exploring, leaderboard rows, ink palette contrast and resident inks, jelly membrane, maze generator/walls, maze food and rainbow spores, rainbow explosions, packing (escape field, overgrown cells get out), path flood + resident phages, home/lap cues |
 | `npm run e2e` | Playwright e2e (menu → play → eaten → respawn, arcade HUD, paper floor in and out of mazes, a rainbow explosion, the press stock) on desktop + phone viewports for the `arcade` and `base` presets, using system Chrome |
 | `npm run size` | Initial-load gzip budget check (run after `build`) |
 | `npm run bench` | Load time (Slow 4G) + render frame times on the local GPU for the `plains`, `maze` and `rainbow` scenes, `--cpu 4` for a low-end proxy, `--scene maze` for one scene (run after `build`) |
 | `npm run arena` | Headless NPC arena, per-personality stats and exploration (30 s windows per radius bucket: share of windows where a cell ended less than 3 r from its start, and turn-rounds per think): `-- --minutes 10 --R 4000 --seed 1`; `-- --preset arcade` adds mazes, resident phages, rainbow spore, explosion and packing metrics (R 16000); `-- --cfg botTurnCost=0.2` overrides numeric config for tuning |
+
+## Deploy (Cloudflare)
+
+The build is a static site served by a Cloudflare Worker with static assets (no Worker script); see `wrangler.jsonc`.
+
+```sh
+npx wrangler login   # once
+npm run deploy       # builds, then uploads dist/ to https://cell.<your-subdomain>.workers.dev
+```
+
+`public/_headers` is copied into `dist/` and sets caching: hashed files under `/assets/` are cached for a year as
+immutable, `index.html` revalidates on every load so new deploys show up straight away. For a custom domain add a
+`routes` entry to `wrangler.jsonc` or attach the domain in the Cloudflare dashboard. For CI, set `CLOUDFLARE_API_TOKEN`
+and `CLOUDFLARE_ACCOUNT_ID` and run `npm run deploy`.
 
 ## URL parameters
 

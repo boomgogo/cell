@@ -30,8 +30,8 @@ export interface FrameStats {
   p95: number;
 }
 
-const HIGH_SCORE_KEY = 'bac.highscore';
-const MUTE_KEY = 'bac.muted';
+const HIGH_SCORE_KEY = 'cell.highscore';
+const MUTE_KEY = 'cell.muted';
 
 function readStore(key: string): string | null {
   try {

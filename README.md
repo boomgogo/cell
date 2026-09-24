@@ -1,4 +1,4 @@
-# bac
+# Cell
 Bacteria eating bacteria on a sphere: a single-player browser game against NPC colonies. Eat pellets and smaller cells,
 split to catch prey, eject mass, and avoid bigger cells and viruses. The world is a sphere, so there are no edges and you
 can walk all the way round it.

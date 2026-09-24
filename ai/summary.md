@@ -1,9 +1,9 @@
-# bac: project summary
+# Cell: project summary
 
 This summarises the design and state of the game up to its public release: what it is, how it is built, why it is built
 that way, what was measured, and what is still open. New prompts, plans and summaries in `ai/` build on this file.
 
-## 1. What bac is
+## 1. What Cell is
 
 A single-player browser game. You are a bacterium on the surface of a sphere, among about 800 NPC colonies.
 

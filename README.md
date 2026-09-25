@@ -98,6 +98,4 @@ npm create vite@latest . -- --template vanilla-ts
 claude --dangerously-skip-permissions
 ```
 
-## License
 
-MIT — see `LICENSE`.

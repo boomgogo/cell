@@ -51,6 +51,8 @@ function writeStore(key: string, value: string): void {
 
 export class Game {
   readonly cfg: GameConfig;
+  /** World seed (also fixes the NPCs' countries). */
+  readonly seed: number;
   readonly world: World;
   readonly camera: Camera;
   readonly renderer: CanvasRenderer;
@@ -75,6 +77,8 @@ export class Game {
   /** Loaded after the first frame (keeps the initial bundle inside its budget). */
   private minimap: Minimap | null = null;
   private readonly startDistrict: number;
+  /** Set by window resizes and quality changes; applied at the start of the next frame, before it renders. */
+  private pendingResize = false;
 
   private spectate: Organism | null = null;
   private spectatePickTick = 0;
@@ -98,6 +102,7 @@ export class Game {
   constructor(canvas: HTMLCanvasElement, cfg: GameConfig, params: URLSearchParams) {
     this.cfg = cfg;
     const seed = Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
+    this.seed = seed;
     this.world = new World(cfg, { seed });
     this.camera = new Camera(cfg);
     this.opts = defaultRenderOptions();
@@ -166,7 +171,7 @@ export class Game {
     this.human = new Organism(this.world.newId(), '', 50, new HumanController(this.input, this.camera), true);
     this.world.addOrganism(this.human);
 
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', () => (this.pendingResize = true));
     this.hud.form.addEventListener('submit', (e) => {
       e.preventDefault();
       this.play(this.hud.nick.value.trim().slice(0, 15));
@@ -185,6 +190,46 @@ export class Game {
       if (e.code === 'KeyM' && !(e.target instanceof HTMLInputElement)) this.toggleMute();
     });
     this.hud.showMenu(null);
+    this.loadFlags(params);
+  }
+
+  /**
+   * Country flags, in idle time after startup so they never delay the menu: the atlas and NPC countries
+   * (`?flags=0` turns flags off), and the player's country from locate.ts (`?geo=0` skips the lookup).
+   */
+  private loadFlags(params: URLSearchParams): void {
+    if (params.get('flags') === '0') return;
+    const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+    const later = (fn: () => void) => (idle ? idle(fn, { timeout: 1500 }) : setTimeout(fn, 500));
+    later(() => {
+      import('./render/canvas/flags.ts')
+        .then(async (m) => {
+          const flags = await m.loadFlags();
+          m.assignCountries(this.world.organisms, this.seed);
+          this.renderer.flags = flags;
+          this.hud.flags = flags;
+        })
+        .catch(() => {
+          /* offline or blocked: no flags */
+        });
+      if (params.get('geo') === '0') return;
+      import('./geo/locate.ts')
+        .then((m) =>
+          m.locateCountry({
+            fetch: (url, init) => fetch(url, init),
+            language: navigator.language ?? '',
+            read: readStore,
+            write: writeStore,
+            now: Date.now,
+          }),
+        )
+        .then((code) => {
+          if (code) this.human.country = code.toLowerCase();
+        })
+        .catch(() => {
+          /* no flag for the player */
+        });
+    });
   }
 
   /** Generate the remaining maze districts in idle time, nearest first. */
@@ -321,6 +366,10 @@ export class Game {
   private frame(now: number): void {
     const dt = Math.min(now - this.last, 250);
     this.last = now;
+    if (this.pendingResize) {
+      this.pendingResize = false;
+      this.resize();
+    }
     const world = this.world;
     const tickMs = this.cfg.tickMs;
 
@@ -367,7 +416,8 @@ export class Game {
       const mean = sorted.reduce((s, v) => s + v, 0) / sorted.length;
       this.stats.fps = mean > 0 ? 1000 / mean : 0;
     }
-    if (this.quality.record(dt, this.opts)) this.resize();
+    // A level change resizes at the start of the next frame: resizing here, after the render, would show a wiped canvas.
+    if (this.quality.record(dt, frameMs, this.opts)) this.pendingResize = true;
     this.onFrame?.(this);
   }
 

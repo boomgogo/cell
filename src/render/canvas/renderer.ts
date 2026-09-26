@@ -13,6 +13,7 @@ import type { World } from '../../sim/world.ts';
 import { type Vec3, nlerp, vec3 } from '../../sphere/vec3.ts';
 import type { Camera } from '../camera.ts';
 import { type BackgroundPattern, drawBackground } from './background.ts';
+import type { Flags } from './flags.ts';
 import { Fx } from './fx.ts';
 import { Membrane, type MembraneBody, stepMembrane } from './membrane.ts';
 import { INKS, RAINBOW_FILL, VIRUS_FILL, fillColor, floorColor, glowColor, stock } from './palette.ts';
@@ -85,6 +86,8 @@ class CellView implements MembraneBody {
   readonly walls = new Float32Array(12);
   wallCount = 0;
   name = '';
+  /** Owner's country code for the flag ('' for none). */
+  country = '';
   own = false;
   /** Resident ghost (passes pen doors, so its membrane squashes against a different wall set). */
   resident = false;
@@ -145,6 +148,8 @@ export interface RenderStats {
   cellsMs: number;
   drawMs: number;
   layerRedraws: number;
+  /** Backing store resizes (each one wipes the canvas). */
+  resizes: number;
 }
 
 export class CanvasRenderer {
@@ -152,18 +157,20 @@ export class CanvasRenderer {
   readonly ctx: CanvasRenderingContext2D;
   readonly opts: RenderOptions;
   dpr = 1;
-  readonly stats: RenderStats = { cells: 0, food: 0, background: 0, ghosts: 0, points: 0, bgMs: 0, foodMs: 0, cellsMs: 0, drawMs: 0, layerRedraws: 0 };
+  readonly stats: RenderStats = { cells: 0, food: 0, background: 0, ghosts: 0, points: 0, bgMs: 0, foodMs: 0, cellsMs: 0, drawMs: 0, layerRedraws: 0, resizes: 0 };
   /** Home nest and trail breadcrumbs as unit vectors (x, y, z triples). */
   home: Vec3 | null = null;
   homeHue = 0;
   trail: Float64Array = new Float64Array(0);
   trailCount = 0;
+  /** Flag atlas (lazy; null until loaded or with ?flags=0). */
+  flags: Flags | null = null;
 
   private readonly views = new Map<number, CellView>();
   private readonly visible: CellView[] = [];
   private readonly ghosts: Ghost[] = [];
   private readonly popups: Popup[] = [];
-  private layer: StaticLayer | null = null;
+  layer: StaticLayer | null = null;
   private frameNo = 0;
   private membraneAcc = 0;
   private readonly pt = { x: 0, y: 0 };
@@ -198,12 +205,24 @@ export class CanvasRenderer {
     }
   }
 
+  /**
+   * Sizes the backing store for the CSS size and the capped DPR. Setting canvas.width wipes the canvas (opaque black,
+   * as it has no alpha), so it only happens when the pixel size really changes, and callers do it before a render,
+   * never between a render and the frame being shown.
+   */
   resize(cssW: number, cssH: number): void {
-    this.dpr = Math.min(window.devicePixelRatio || 1, this.opts.dprCap);
-    this.canvas.width = Math.round(cssW * this.dpr);
-    this.canvas.height = Math.round(cssH * this.dpr);
-    this.canvas.style.width = `${cssW}px`;
-    this.canvas.style.height = `${cssH}px`;
+    const dpr = Math.min(window.devicePixelRatio || 1, this.opts.dprCap);
+    const w = Math.round(cssW * dpr);
+    const h = Math.round(cssH * dpr);
+    const cw = `${cssW}px`;
+    const ch = `${cssH}px`;
+    if (dpr === this.dpr && w === this.canvas.width && h === this.canvas.height && this.canvas.style.width === cw && this.canvas.style.height === ch) return;
+    this.dpr = dpr;
+    this.canvas.width = w;
+    this.canvas.height = h;
+    this.canvas.style.width = cw;
+    this.canvas.style.height = ch;
+    this.stats.resizes++;
     this.layer?.invalidate();
   }
 
@@ -616,6 +635,7 @@ export class CanvasRenderer {
       const owner = c.owner;
       v.own = player !== null && owner === player;
       v.name = owner ? owner.name : '';
+      v.country = owner ? owner.country : '';
       v.resident = owner?.resident != null;
       v.rainbow = 0;
       if (owner && isRainbow(owner, tick)) {
@@ -918,12 +938,22 @@ export class CanvasRenderer {
       if (screenR < 14) continue;
       let y = v.sy;
       const namePx = Math.max(v.dr * 0.3, 24) * zoom;
+      // The flag sits left of the name, about its cap height; flag and name are centred together.
+      const flags = this.flags;
+      const flagH = flags && v.country && namePx >= 7 ? Math.min(28, namePx * 0.75) : 0;
+      const flagW = (flagH * 4) / 3;
       if (v.name && namePx >= 7) {
         const s = textSprite(v.name, namePx, dpr);
         const sw = s.width / dpr;
         const sh = s.height / dpr;
-        ctx.drawImage(s, v.sx - sw / 2, y - sh / 2, sw, sh);
+        // The sprite's own padding (~0.15 × size) is the gap between flag and name.
+        const shift = flagH > 0 ? flagW / 2 - namePx * 0.05 : 0;
+        ctx.drawImage(s, v.sx - sw / 2 + shift, y - sh / 2, sw, sh);
+        if (flagH > 0) flags!.draw(ctx, v.country, v.sx - sw / 2 + shift - flagW + namePx * 0.1, y - flagH / 2, flagH, this.opts.fx >= 2);
         y += sh / 2 + 2;
+      } else if (flagH > 0) {
+        flags!.draw(ctx, v.country, v.sx - flagW / 2, y - flagH / 2, flagH, this.opts.fx >= 2);
+        y += flagH / 2 + 4;
       }
       if (v.own && this.opts.showMass) {
         const massPx = namePx * 0.5;

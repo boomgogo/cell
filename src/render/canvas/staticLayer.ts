@@ -45,6 +45,8 @@ export class StaticLayer {
   redraws = 0;
   lastDrawMs = 0;
   lastCount = 0;
+  /** Why the last redraw happened: invalid, style, size, zoom, move or turn. */
+  lastReason = '';
   private light = false;
 
   constructor(cfg: GameConfig) {
@@ -63,26 +65,28 @@ export class StaticLayer {
     const W = Math.ceil(cam.width * OVERSIZE);
     const H = Math.ceil(cam.height * OVERSIZE);
     const key = `${style.pattern}|${style.light}`;
-    let redraw = !this.valid || key !== this.key || dpr !== this.dpr0 || W !== this.W || H !== this.H;
+    let reason = !this.valid ? 'invalid' : key !== this.key ? 'style' : dpr !== this.dpr0 || W !== this.W || H !== this.H ? 'size' : '';
     const pt = this.pt;
     let angle = 0;
     let scale = 1;
-    if (!redraw) {
+    if (!reason) {
       scale = cam.zoom / this.z0;
-      if (scale < 0.98 || scale > 1.02 || !cam.toScreen(this.c0, pt)) redraw = true;
+      if (scale < 0.98 || scale > 1.02 || !cam.toScreen(this.c0, pt)) reason = 'zoom';
       else {
         const mx = ((OVERSIZE - 1) / 2) * cam.width * 0.8;
         const my = ((OVERSIZE - 1) / 2) * cam.height * 0.8;
-        if (Math.abs(pt.x - cam.width / 2) > mx || Math.abs(pt.y - cam.height / 2) > my) redraw = true;
+        if (Math.abs(pt.x - cam.width / 2) > mx || Math.abs(pt.y - cam.height / 2) > my) reason = 'move';
         else {
           const e = copy(this.tmp, this.e0);
           transport(e, this.c0, cam.center);
           angle = Math.atan2(dot(e, cam.frame.s), dot(e, cam.frame.e));
-          if (Math.abs(angle) > 0.06) redraw = true;
+          if (Math.abs(angle) > 0.06) reason = 'turn';
         }
       }
     }
+    const redraw = reason !== '';
     if (redraw) {
+      this.lastReason = reason;
       this.render(world, cam, dpr, style, W, H);
       this.key = key;
       pt.x = cam.width / 2;

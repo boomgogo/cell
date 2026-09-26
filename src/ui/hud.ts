@@ -1,5 +1,6 @@
 // DOM HUD: score, leaderboard, menu, touch buttons (plain DOM, interactive immediately), plus the arcade
 // HUD: points and high score, power bar, district banner, toasts, minimap, mute and the home arrow.
+import type { Flags } from '../render/canvas/flags.ts';
 import type { Organism } from '../sim/organism.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -25,6 +26,8 @@ export class Hud {
   readonly mute = $<HTMLButtonElement>('mute');
   readonly homeArrow = $<HTMLDivElement>('home-arrow');
   arcade = false;
+  /** Flag atlas for the leaderboard (lazy; null until loaded). */
+  flags: Flags | null = null;
   private lastBoard = '';
   private lastScore = -1;
   private lastPoints = -1;
@@ -130,15 +133,24 @@ export class Hud {
 
   setLeaderboard(board: Organism[], player: Organism | null): void {
     const rows = boardRows(board, player);
-    // Rebuild the list only when names or the player's row change; ranks and masses are text writes.
-    const key = rows.map((r) => (r.me ? '*' : '') + r.name).join('\n');
+    // Rebuild the list only when names, flags or the player's row change; ranks and masses are text writes.
+    const flags = this.flags;
+    const key = (flags ? 'f' : '') + rows.map((r) => (r.me ? '*' : '') + r.country + ':' + r.name).join('\n');
     if (key !== this.lastBoard) {
       this.lastBoard = key;
       this.leaderboard.replaceChildren(
         ...rows.map((r) => {
           const li = document.createElement('li');
           li.innerHTML = '<span class="rk"></span><span class="nm"></span><span class="ms"></span>';
-          (li.children[1] as HTMLElement).textContent = r.name;
+          const nm = li.children[1] as HTMLElement;
+          nm.textContent = r.name;
+          const css = flags && r.country ? flags.css(r.country) : '';
+          if (css) {
+            const fl = document.createElement('i');
+            fl.className = 'fl';
+            fl.style.cssText = css;
+            nm.prepend(fl);
+          }
           if (r.me) li.className = 'me';
           return li;
         }),
@@ -160,13 +172,15 @@ export const UNNAMED = 'A stray spore';
 export interface BoardRow {
   rank: number;
   name: string;
+  /** Flag country code ('' for none). */
+  country: string;
   mass: number;
   me: boolean;
 }
 
 /** Top 10 of the (already sorted) board, plus the player's own row when outside it. */
 export function boardRows(board: Organism[], player: Organism | null): BoardRow[] {
-  const row = (o: Organism, i: number): BoardRow => ({ rank: i + 1, name: o.name || UNNAMED, mass: Math.floor(o.lastMass), me: o === player });
+  const row = (o: Organism, i: number): BoardRow => ({ rank: i + 1, name: o.name || UNNAMED, country: o.country, mass: Math.floor(o.lastMass), me: o === player });
   const rows = board.slice(0, 10).map(row);
   if (player && player.alive && !rows.some((r) => r.me)) {
     const rank = board.indexOf(player);

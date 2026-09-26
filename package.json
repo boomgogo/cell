@@ -16,11 +16,13 @@
     "size": "node scripts/size-check.ts",
     "arena": "node scripts/arena.ts",
     "bench": "node scripts/bench.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "flags": "node scripts/flags-atlas.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@types/node": "^24.0.0",
+    "flag-icons": "^7.5.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.0",

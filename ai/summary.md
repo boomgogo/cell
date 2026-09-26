@@ -77,6 +77,9 @@ The key decisions, and why:
   - Adaptive quality watches the rolling p95 frame time and steps between levels 0 and 6. The order is: grain off →
     lower resolution → fewer membrane points and effects → no contact and wall dents → no jelly and minimal effects →
     grid off.
+    Since plan 0 it judges load rather than vsync (a slow median interval, or frame work filling most of the interval),
+    resizes the canvas only when the pixel size changes and only before a render, and stops stepping back up after a
+    flip-flop.
   - Walls, region borders, the floor grid and junction emblems are drawn into a cached static layer. It is redrawn
     only when the camera has moved or zoomed enough.
 - **Lazy maze generation.** Districts are generated in idle time, nearest first (about 10 ms each).

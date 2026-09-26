@@ -18,14 +18,14 @@ describe('boardRows', () => {
     const rows = boardRows(board, null);
     expect(rows).toHaveLength(10);
     expect(rows.map((r) => r.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    expect(rows[0]).toEqual({ rank: 1, name: 'n0', mass: 3000, me: false });
+    expect(rows[0]).toEqual({ rank: 1, name: 'n0', country: '', mass: 3000, me: false });
     expect(rows[9].mass).toBe(2550);
   });
 
   it('appends the player with their true rank when outside the top 10', () => {
     const rows = boardRows(board, board[24]);
     expect(rows).toHaveLength(11);
-    expect(rows[10]).toEqual({ rank: 25, name: 'n24', mass: 1800, me: true });
+    expect(rows[10]).toEqual({ rank: 25, name: 'n24', country: '', mass: 1800, me: true });
   });
 
   it('does not duplicate the player inside the top 10', () => {

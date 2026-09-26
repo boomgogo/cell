@@ -16,6 +16,8 @@ export interface Resident {
 export class Organism {
   readonly id: number;
   name: string;
+  /** Country for the flag next to the name: ISO 3166-1 alpha-2, lower case; '' for none. Presentation only. */
+  country = '';
   hue: number;
   species: SpeciesDef = COCCUS;
   readonly cells: Cell[] = [];

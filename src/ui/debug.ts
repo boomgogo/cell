@@ -176,9 +176,36 @@ export function mountDebug(game: Game): void {
 
   const stats = el<HTMLPreElement>('dbg-stats');
   let n = 0;
+  // Frame event log (flicker hunting): quality level changes, backing store resizes and static layer redraws.
+  const log: string[] = [];
+  const push = (line: string) => {
+    log.push(`${(performance.now() / 1000).toFixed(1)}s ${line}`);
+    if (log.length > 6) log.shift();
+  };
+  let seenQuality = game.quality.events.length ? game.quality.events[game.quality.events.length - 1] : null;
+  let seenResizes = game.renderer.stats.resizes;
+  let seenRedraws = game.renderer.stats.layerRedraws;
+  let changes = 0;
+  const t0 = performance.now();
   game.onFrame = (g) => {
     if (showEscape) drawEscape(g);
     if (showNpcs) drawNpcs(g);
+    const q = g.quality.events[g.quality.events.length - 1] ?? null;
+    if (q && q !== seenQuality) {
+      seenQuality = q;
+      changes++;
+      push(`quality ${q.from}→${q.to} (dt p50 ${q.dtP50.toFixed(1)} p95 ${q.dtP95.toFixed(1)}, work p95 ${q.workP95.toFixed(1)} ms)`);
+    }
+    const rs = g.renderer.stats;
+    if (rs.resizes !== seenResizes) {
+      seenResizes = rs.resizes;
+      push(`resize → ${g.renderer.canvas.width}×${g.renderer.canvas.height} @${g.renderer.dpr}`);
+    }
+    if (rs.layerRedraws !== seenRedraws) {
+      seenRedraws = rs.layerRedraws;
+      const layer = g.renderer.layer;
+      if (layer) push(`layer redraw: ${layer.lastReason} (${layer.lastDrawMs.toFixed(1)} ms)`);
+    }
     if (n++ % 15 !== 0) return;
     const w = g.world;
     const r = g.renderer.stats;
@@ -196,12 +223,14 @@ export function mountDebug(game: Game): void {
     }
     stats.textContent =
       `fps ${g.stats.fps.toFixed(0)}  p95 ${g.stats.p95.toFixed(1)} ms\n` +
-      `tick ${g.stats.tickMs.toFixed(2)} ms  quality ${g.quality.level}\n` +
+      `tick ${g.stats.tickMs.toFixed(2)} ms  quality ${g.quality.level}${g.quality.locked ? ' (locked)' : ''}  ` +
+      `changes/min ${((changes * 60000) / Math.max(1, performance.now() - t0)).toFixed(1)}\n` +
       `zoom ${g.camera.zoom.toFixed(3)}  view ${(g.camera.viewRadius()).toFixed(0)} u\n` +
       `cells ${r.cells}  food ${r.food}  bg ${r.background}\n` +
       `points ${r.points}  ghosts ${r.ghosts}\n` +
       `npc active ${active} / ${w.organisms.length - 1}\n` +
       `food total ${w.food.count}  viruses ${w.virusCount}` +
-      mazeLine;
+      mazeLine +
+      `\n${log.join('\n')}`;
   };
 }

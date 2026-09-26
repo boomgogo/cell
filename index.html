@@ -24,6 +24,7 @@
       #lb .rk { flex: none; min-width: 1.7em; font-variant-numeric: tabular-nums; }
       #lb .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
       #lb .ms { flex: none; font-variant-numeric: tabular-nums; }
+      #lb .fl { display: inline-block; width: 16px; height: 12px; margin-right: 5px; vertical-align: -1px; outline: 1px solid var(--key); outline-offset: -1px; }
       #lb li.me { background: var(--coral); color: #241f1c; }
       #menu { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--paper) 55%, transparent); }
       .panel { width: min(340px, 100%); padding: 20px; background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; box-shadow: 6px 6px 0 var(--navy); text-align: center; }
@@ -34,6 +35,9 @@
       #play { font: inherit; font-weight: 800; letter-spacing: 1px; padding: 10px; border: 2px solid var(--key); border-radius: 2px; background: var(--coral); color: #241f1c; cursor: pointer; box-shadow: 3px 3px 0 var(--key); }
       #play:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--key); }
       .help { margin: 12px 0 0; font-size: 13px; opacity: 0.75; }
+      .fork { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 0; font-size: 13px; font-weight: 700; color: var(--key); text-decoration: none; border-bottom: 3px solid var(--emerald); padding: 0 1px 1px; }
+      .fork:hover, .fork:focus-visible { background: color-mix(in srgb, var(--emerald) 25%, transparent); outline: none; }
+      .fork svg { width: 16px; height: 16px; fill: currentColor; flex: none; }
       #death { margin: 12px 0 0; font-weight: 800; color: var(--key); background: var(--pink); padding: 4px 6px; }
       #touch { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); display: flex; gap: 14px; }
       #touch button { width: 72px; height: 72px; border-radius: 50%; border: 2px solid var(--key); background: color-mix(in srgb, var(--paper) 80%, transparent); color: var(--key); font: 800 16px system-ui, sans-serif; touch-action: none; box-shadow: 3px 3px 0 var(--emerald); }
@@ -91,6 +95,7 @@
         </form>
         <p class="help">Steer with mouse or finger · <b>Space</b> split · <b>W</b> eject</p>
         <p class="help" id="arcade-help" hidden>Rainbow spores in the mazes let you explode bigger cells · find your way home</p>
+        <a class="fork" id="fork" href="https://github.com/boomgogo/cell" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>Fork me on GitHub</a>
         <p id="death" hidden></p>
       </div>
     </div>

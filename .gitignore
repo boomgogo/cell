@@ -150,3 +150,6 @@ playwright-report/
 # wrangler
 .wrangler/
 .dev.vars*
+
+# Recordings (videos, logs and tuning output; large)
+recordings/

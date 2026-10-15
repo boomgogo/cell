@@ -15,6 +15,9 @@
     "test:watch": "vitest",
     "size": "node scripts/size-check.ts",
     "arena": "node scripts/arena.ts",
+    "autoplay": "node scripts/autoplay.ts",
+    "record": "node scripts/record.ts",
+    "cut": "node scripts/cut.ts",
     "bench": "node scripts/bench.ts",
     "e2e": "playwright test",
     "flags": "node scripts/flags-atlas.ts"

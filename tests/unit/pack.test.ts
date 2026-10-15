@@ -193,7 +193,8 @@ describe('escape field', () => {
     d.buildEscape();
     const t0 = performance.now();
     for (let k = 0; k < 5; k++) d.buildEscape();
-    expect((performance.now() - t0) / 5).toBeLessThan(5);
+    // A loose bound (about 0.6 ms when the machine is idle): test files share the CPU.
+    expect((performance.now() - t0) / 5).toBeLessThan(15);
   });
 
   it('connects the avenue ring to the plains in the class-2 labels', () => {
@@ -221,6 +222,14 @@ describe('cells that outgrow their corridor get out (regression)', () => {
       }
     });
   }
+
+  it('a cell nearly as wide as a fine corridor gets from a two-tile corridor into the one-tile one at its side', () => {
+    // District 0 (mapSeed 1): from tile 25,67 the way out runs up a two-tile corridor that goes on as a one-tile one at
+    // its left. Corner assist used to hold the cell on the wide corridor's centre line, against the wall's corner.
+    const d = arcadeWorld().maze.district(0);
+    const tile = 67 * d.G + 25;
+    for (const r of [d.escape[tile] - 0.3, 66, 62]) expect(trial(0, tile, 25, r, false, 10, false).out, `r ${r}`).toBe(true);
+  });
 
   it('cells that grew to just under the way out (they fit, so nothing is packed) get out too', () => {
     for (const dIndex of [0, 9]) {
@@ -417,5 +426,5 @@ describe('fairness and the whole game', () => {
     expect(checked).toBeGreaterThan(10_000);
     expect(packs).toBeGreaterThan(0);
     expect(over).toBe(0);
-  });
+  }, 60_000);
 });

@@ -118,11 +118,14 @@ const bucketName = (i: number) => (i === 0 ? 'r < 100' : BUCKETS[i] === Infinity
 interface Explore {
   windows: number;
   stuck: number;
+  /** Windows ending inside a maze interior, and how many of those were stuck. */
+  mazeWindows: number;
+  mazeStuck: number;
   ratios: number[];
   thinks: number;
   reversals: number;
 }
-const explore = BUCKETS.map((): Explore => ({ windows: 0, stuck: 0, ratios: [], thinks: 0, reversals: 0 }));
+const explore = BUCKETS.map((): Explore => ({ windows: 0, stuck: 0, mazeWindows: 0, mazeStuck: 0, ratios: [], thinks: 0, reversals: 0 }));
 interface Win {
   start: { x: number; y: number; z: number };
   last: { x: number; y: number; z: number };
@@ -222,7 +225,12 @@ for (let t = 0; t < ticks; t++) {
         const net = world.distance(w.start, c.p);
         const b = explore[BUCKETS.findIndex((r) => c.r < r)];
         b.windows++;
-        if (net < 3 * c.r) b.stuck++;
+        const inMaze = maze.enabled && maze.inInterior(c.p);
+        if (inMaze) b.mazeWindows++;
+        if (net < 3 * c.r) {
+          b.stuck++;
+          if (inMaze) b.mazeStuck++;
+        }
         b.ratios.push(net / w.path);
         b.thinks += bot.thinks - w.thinks;
         b.reversals += bot.reversals - w.reversals;
@@ -305,13 +313,14 @@ if (arcade) {
       `packs ${packs}, swells ${unpacks}, most packed ${maxPacked.toFixed(0)}`,
   );
 }
-console.log('explore (30 s windows)  windows  stuck-%  median net/path  reversals/think');
+console.log('explore (30 s windows)  windows  stuck-%  median net/path  reversals/think' + (arcade ? '  in mazes: windows  stuck-%' : ''));
 explore.forEach((b, i) => {
   if (!b.windows) return;
   b.ratios.sort((x, y) => x - y);
   console.log(
     `${bucketName(i).padEnd(22)} ${String(b.windows).padStart(8)} ${((100 * b.stuck) / b.windows).toFixed(0).padStart(8)} ` +
-      `${b.ratios[b.ratios.length >> 1].toFixed(2).padStart(16)} ${(b.reversals / Math.max(1, b.thinks)).toFixed(2).padStart(16)}`,
+      `${b.ratios[b.ratios.length >> 1].toFixed(2).padStart(16)} ${(b.reversals / Math.max(1, b.thinks)).toFixed(2).padStart(16)}` +
+      (arcade ? `${String(b.mazeWindows).padStart(19)} ${((100 * b.mazeStuck) / Math.max(1, b.mazeWindows)).toFixed(0).padStart(8)}` : ''),
   );
 });
 console.log(`bot decisions: ${JSON.stringify(botStats)}`);

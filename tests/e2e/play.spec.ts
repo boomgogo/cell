@@ -57,7 +57,8 @@ for (const preset of ['arcade', 'base']) {
     await page.fill('#nick', 'e2e');
     await page.click('#play');
     await expect(page.locator('#menu')).toBeHidden();
-    await expect(page.locator('#score')).toHaveText(/Score: \d+/);
+    // Arcade calls the box Mass (the points are the score there); base keeps Score.
+    await expect(page.locator('#score')).toHaveText(preset === 'arcade' ? /Mass \d+/ : /Score: \d+/);
     if (info.project.name === 'phone') await expect(page.locator('#btn-split')).toBeVisible();
 
     if (preset === 'arcade') {
@@ -176,7 +177,7 @@ for (const preset of ['arcade', 'base']) {
       Object.assign(c.prev, target);
       c.r = 400;
     });
-    await expect(page.locator('#death')).toHaveText(/Eaten/, { timeout: 5000 });
+    await expect(page.locator('#death')).toHaveText(preset === 'arcade' ? /Eaten.* · [\d,]+ points · peak mass \d+/ : /Eaten/, { timeout: 5000 });
     await expect(page.locator('#menu')).toBeVisible();
 
     await page.click('#play');

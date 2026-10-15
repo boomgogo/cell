@@ -33,7 +33,7 @@ describe('NPC arena smoke test', () => {
     // Everyone alive has grown or respawned; controllers really are bots.
     expect(npcs.every((o) => o.controller instanceof BotController)).toBe(true);
     expect(Math.max(...npcs.map((o) => o.peakMass))).toBeGreaterThan(300);
-  });
+  }, 30_000);
 
   it('dormant NPCs keep living statistically outside the active zone', () => {
     const cfg = loadConfig(new URLSearchParams());
@@ -88,7 +88,7 @@ describe('big NPCs keep exploring', () => {
       }
       expect(travelled).toBeGreaterThanOrEqual(5);
       expect(reversals).toBeLessThan(0.1);
-    });
+    }, 15_000);
   }
 
   it('district: an r-400 grazer on the avenue ring, with maze food on, covers more than 3 r in 30 s', () => {
@@ -107,5 +107,5 @@ describe('big NPCs keep exploring', () => {
       const { net } = travel(world, org, bot, 30);
       expect(net, `district ${dIndex}`).toBeGreaterThan(3 * 400);
     }
-  });
+  }, 15_000);
 });

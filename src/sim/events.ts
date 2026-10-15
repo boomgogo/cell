@@ -16,6 +16,8 @@ export interface EatEvent {
   hue: number;
   /** Organism of the eater (−1 for unowned eaters like viruses). */
   eaterOrg: number;
+  /** Organism of the eaten cell (−1 for food and unowned cells). Equal to `eaterOrg` when own cells merge. */
+  preyOrg: number;
   /** For food: PELLET / POWER (−1 for cells). */
   foodKind: number;
   /** For food: the maze spot (district << 16 | slot), −1 in the plains and for cells. */

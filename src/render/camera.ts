@@ -1,5 +1,6 @@
 // Sphere camera: centre + carried-along screen directions, eased zoom.
 import type { GameConfig } from '../config/types.ts';
+import type { MazeWorld } from '../maze/walls.ts';
 import { viewScale } from '../sim/rules.ts';
 import { Frame, type Vec2 } from '../sphere/frame.ts';
 import { type Vec3, angle, copy, rotateToward, vec3 } from '../sphere/vec3.ts';
@@ -156,4 +157,25 @@ export class Camera {
   get scratch(): Vec2 {
     return this.local;
   }
+}
+
+/**
+ * Camera.district for a world's mazes: how far inside a built district c is (fading in over the 1 500 units outside
+ * the avenue ring) and the district's screen-up direction.
+ */
+export function districtView(maze: MazeWorld): (c: Vec3, up: Vec3, right: Vec3) => number {
+  return (c, up, right) => {
+    const i = maze.regionWithGridAt(c, 1500);
+    if (i < 0 || !maze.isBuilt(i)) return 0;
+    const d = maze.district(i);
+    if (!d.locate(c)) return 0;
+    const G = d.G;
+    const lo = 8;
+    const out = Math.max(lo - d.gx, d.gx - (G - lo), lo - d.gy, d.gy - (G - lo), 0) * d.F;
+    d.axes(c, right, up);
+    up.x = -up.x;
+    up.y = -up.y;
+    up.z = -up.z;
+    return Math.max(0, 1 - out / 1500);
+  };
 }

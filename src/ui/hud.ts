@@ -75,7 +75,8 @@ export class Hud {
     const s = Math.floor(mass);
     if (s === this.lastScore) return;
     this.lastScore = s;
-    this.score.textContent = `Score: ${s}`;
+    // In arcade the points are the score; this box is the mass.
+    this.score.textContent = this.arcade ? `Mass ${s}` : `Score: ${s}`;
   }
 
   setPoints(points: number, high: number, laps: number): void {

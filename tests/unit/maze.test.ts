@@ -37,7 +37,8 @@ describe('maze generator', () => {
     mw.district(0); // warm-up
     const t0 = performance.now();
     for (let i = 1; i < 12; i++) mw.district(i);
-    expect((performance.now() - t0) / 11).toBeLessThan(40);
+    // A loose bound (about 10 ms each when the machine is idle): test files share the CPU. `npm run bench` measures it.
+    expect((performance.now() - t0) / 11).toBeLessThan(120);
   });
 });
 

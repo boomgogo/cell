@@ -1,4 +1,6 @@
 # Cell
+**Play at <https://c0.muon.day/>**
+
 Bacteria eating bacteria on a sphere: a single-player browser game against NPC colonies. Eat pellets and smaller cells,
 split to catch prey, eject mass, and avoid bigger cells and viruses. The world is a sphere, so there are no edges and you
 can walk all the way round it.
@@ -43,12 +45,49 @@ npm run dev
 | `npm run preview` | Serve `dist/` |
 | `npm run preview:cf` | Build, then serve `dist/` through the local Cloudflare runtime (`wrangler dev`) |
 | `npm run deploy` | Build, then deploy to Cloudflare Workers (`wrangler deploy`) |
-| `npm test` | Unit tests (Vitest): sphere math, rules, mechanics, virus pop pieces, lap test, NPC arena smoke test, big NPCs keep exploring, leaderboard rows, ink palette contrast and resident inks, jelly membrane, maze generator/walls, maze food and rainbow spores, rainbow explosions, packing (escape field, overgrown cells get out), path flood + resident phages, home/lap cues, adaptive quality (no flip-flopping at 60/120/144 Hz), NPC countries by population, the country lookup chain |
+| `npm test` | Unit tests (Vitest): sphere math, rules, mechanics, virus pop pieces, lap test, NPC arena smoke test, big NPCs keep exploring, leaderboard rows, ink palette contrast and resident inks, jelly membrane, maze generator/walls, maze food and rainbow spores, rainbow explosions, packing (escape field, overgrown cells get out), path flood + resident phages, home/lap cues, adaptive quality (no flip-flopping at 60/120/144 Hz), NPC countries by population, the country lookup chain, arcade points (own cells merging back score nothing), the autoplayer (it sees only the screen, flees, chases, splits only when safe, moves like a hand, plays the same game twice) |
 | `npm run e2e` | Playwright e2e (menu → play → eaten → respawn, arcade HUD, paper floor in and out of mazes, a rainbow explosion, the press stock, country flags with a stubbed Cloudflare trace, the GitHub link, no blank frame on a quality change) on desktop + phone viewports for the `arcade` and `base` presets, using system Chrome |
 | `npm run flags` | Rebuild the flag atlas (`src/assets/flags.webp` + `flagIndex.ts`) from `flag-icons` with system Chrome; the output is committed |
 | `npm run size` | Initial-load gzip budget check (run after `build`) |
 | `npm run bench` | Load time (Slow 4G) + render frame times on the local GPU for the `plains`, `maze` and `rainbow` scenes, `--cpu 4` for a low-end proxy, `--scene maze` for one scene (run after `build`) |
+| `npm run autoplay` | The autoplayer in Node, faster than real time (see [Autoplay and recordings](#autoplay-and-recordings)): `-- run --seed 3`, `-- batch --seeds 1-200` (statistics; `--driver npc` for the NPC-brain baseline), `-- tune --seeds 1-200 --holdout 1001-1200` (tune the brain for its mass at 5:00) |
+| `npm run record` | Plays the built game in Chrome with the autoplayer and records it frame by frame: `-- dry`, `-- search`, `-- pilot`, `-- youtube`, `-- watch` (run after `build`) |
+| `npm run cut` | The finished videos and their text from the recordings: `-- youtube`, `-- short --seed N`, `-- x` |
 | `npm run arena` | Headless NPC arena, per-personality stats and exploration (30 s windows per radius bucket: share of windows where a cell ended less than 3 r from its start, and turn-rounds per think): `-- --minutes 10 --R 4000 --seed 1`; `-- --preset arcade` adds mazes, resident phages, rainbow spore, explosion and packing metrics (R 16000); `-- --cfg botTurnCost=0.2` overrides numeric config for tuning |
+
+## Autoplay and recordings
+
+The autoplayer plays the real game the way a person does, for making videos:
+
+- **It sees only the screen.** Its brain (`scripts/autoplay/brain.ts`) gets a snapshot of what a player sees
+  (`snapshot.ts`): the cells and food on screen, the minimap's spores, the leaderboard. It knows the mazes, which are the
+  same every game, and remembers what it saw a moment ago. It never reads off-screen cells, NPC minds or the world's
+  random numbers.
+- **It plays to be as big as possible at the end of 5 minutes**, and a death throws the run away: it weighs every
+  heading by the mass it would gain against the mass it would risk, splits onto prey only when nothing could eat the
+  halves, and times rainbow spores for when big cells are near. All its numbers are in `BrainParams`, tuned with
+  `npm run autoplay -- tune`.
+- **It moves like a hand** (`hands.ts`): a 150–260 ms reaction, Fitts's-law reaches that swing around the cell, smooth
+  pursuit with a little tremor, Space held 60–110 ms and at most about five presses a second; on a phone, one thumb
+  drags and the other taps Split. Input goes to Chrome as real mouse, keyboard and touch events.
+
+`npm run record` plays the built site in headless Chrome on the GPU and owns the page's clock: every frame is drawn in
+full, captured and piped to ffmpeg (x264, BT.709), and the sound is rendered offline in step with the frames. A dry run
+(no capture, no rendering) predicts the run; a recording replays the same seed and must match the dry run's state hash
+every second. Recordings are big: `--out` points the output at another drive (it must exist), and the default
+`recordings/` is ignored by git.
+
+```sh
+npm run build
+npm run autoplay -- tune --out /path/to/recordings/tune         # tuned parameters → tune/params.json
+npm run record -- search --seeds 1-200 --out /path/to/recordings
+npm run record -- youtube --seed 42 --out /path/to/recordings   # the 5-minute master, checked against its dry run
+npm run cut -- youtube --out /path/to/recordings                # youtube.txt, chapters, thumbnails
+npm run record -- search --profile short --seeds 1-100 --out /path/to/recordings
+npm run cut -- short --seed 17 --out /path/to/recordings        # the Short, re-recorded by touch from its dry run
+npm run cut -- x --out /path/to/recordings                      # a 16:9 cut for X
+npm run record -- watch --seed 42                               # see it play, in a window, in real time
+```
 
 ## Deploy (Cloudflare)
 

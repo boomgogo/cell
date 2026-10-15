@@ -115,9 +115,12 @@ function tryGenerate(n: number, seed: number): Maze | null {
   const taken = new Uint8Array(m * m);
   const squares: [number, number][] = [];
   for (let r = 0; r + 2 < m; r += 2) for (let c = 0; c + 2 <= n - 2; c += 2) squares.push([r, c]);
-  // Corner squares first (they hold the power pellets), then the rest in random order.
+  // Corner squares first (they hold the power pellets), then the rest in random order. Shuffle, then a stable sort on
+  // the corner rule alone: a random comparator inside sort() draws from the rng as many times as the engine's sort
+  // compares, which differs between JavaScript engines, so the same mapSeed gave different mazes in different browsers.
   const isCorner = ([r, c]: [number, number]) => c === 0 && (r === 0 || r === m - 3);
-  squares.sort((a, b) => Number(isCorner(b)) - Number(isCorner(a)) || rng() - 0.5);
+  shuffle(squares, rng);
+  squares.sort((a, b) => Number(isCorner(b)) - Number(isCorner(a)));
   let powerLeft: [number, number][] = [];
   for (const [r, c] of squares) {
     let solid = true;

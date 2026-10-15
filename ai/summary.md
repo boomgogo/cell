@@ -103,7 +103,10 @@ The key decisions, and why:
   - Twelve regions sit around the icosahedron's vertices. Each has an ink, a name and a fruit emoji, with a district at
     its centre.
   - The layout comes from `mapSeed` (default 1), not the world seed, so the same mazes appear every game. That helps
-    recognition.
+    recognition. (Until plan 1 a random comparator inside a sort made the mazes differ between browsers; the
+    generator now shuffles, then sorts stably.)
+  - A world starts (attract mode, and the first spawn) in a district picked by the world seed. Until plan 1 a bug
+    (`Number(null)` is 0) always picked district 1, Cherry Commons.
 - **Districts.**
   - Each is a seeded, left-right symmetric maze on an equiangular gnomonic chart, 70 fine tiles of 140 units (9 800
     units) across.
@@ -140,7 +143,9 @@ The key decisions, and why:
     4 % of radius per tick once there is room.
   - This fixed cells that grew inside a corridor and could never leave.
 - **Camera in mazes.** Inside a district the camera zooms out (×0.6, ×0.45 on portrait screens) and turns to the
-  district's "up". Corner assist bends a heading within 60° of a corridor into it.
+  district's "up". Corner assist bends a heading within 60° of a corridor into it. Where the corridor ahead narrows to
+  an opening off its centre line (two tiles going on as one, at one side), the cell first slides onto the opening's
+  line; before plan 1 the assist held a cell nearly as wide as the opening against the wall's corner.
 
 ### 4.3 NPCs
 - **Steering.** Context steering over 16 directions in the NPC's local chart. Food, prey, threats, viruses and spores
@@ -188,7 +193,8 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
   - Touching rims dent a little and spring back.
   - Rims are squashed against maze walls.
   - Cells under ~20 px on screen are plain circles.
-- **The HUD** is plain DOM with paper panels, key borders and flat offset ink shadows.
+- **The HUD** is plain DOM with paper panels, key borders and flat offset ink shadows. In arcade the bottom-left box
+  is the **Mass** (the points are the score there); the death card shows the run's points and peak mass.
   - The leaderboard shows the top 10 plus your own row, each with its mass.
   - The arcade HUD shows points, high score, a rainbow bar, a district banner, toasts, a globe minimap and a home arrow.
 - **Sound** is WebAudio oscillators and one noise buffer, loaded on the first Play: chomp, rainbow loop, explosion, and
@@ -214,6 +220,13 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
 - **`npm run bench`:** load time on Slow 4G, and render frame times on the local GPU for the `plains`, `maze` and
   `rainbow` scenes. `--cpu 4` gives a low-end proxy.
 - **`npm run size`:** the initial-load gzip budget.
+- **`npm run autoplay`:** the autoplayer in Node (`scripts/autoplay/`): a player brain that sees only a snapshot of the
+  screen, hands that move like a person's, and a harness that mirrors Game's frame loop. `batch` gives statistics over
+  seeds (`--driver npc` for the NPC-brain baseline); `tune` searches the brain's parameters for mass at 5:00.
+- **`npm run record`:** plays the built game in headless Chrome with the autoplayer, through real CDP input, with a
+  recorder-owned clock (every frame drawn in full, sound rendered offline in step). Dry runs predict a run; recordings
+  must match their dry run's state hash every second. `npm run cut` makes the YouTube text and stills, the Short and
+  the X cut. Plan 1 (`ai/plan_1.md`, `ai/next_1.md`) has the details.
 - **`?debug=1`:** the debug panel. It has stock toggle, background pattern, zoom, membrane toggles, sphere radius and maze
   toggles. It can teleport, turn you rainbow, bring a big NPC or feed +50. It has an escape radius overlay, an NPC goals
   overlay and live stats.

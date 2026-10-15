@@ -7,18 +7,19 @@ import { DIFFICULTY, PERSONALITIES } from './ai/personalities.ts';
 import { populateNpcs, populateResidents } from './ai/population.ts';
 import { HumanController } from './input/human.ts';
 import { Input } from './input/input.ts';
-import { Camera } from './render/camera.ts';
+import { Camera, districtView } from './render/camera.ts';
 import { setStock } from './render/canvas/palette.ts';
 import { CanvasRenderer, type RenderOptions, defaultRenderOptions } from './render/canvas/renderer.ts';
 import { QUALITY_LEVELS, QualityController } from './render/quality.ts';
-import { FOOD_KIND, PELLET, POWER } from './sim/food.ts';
+import { FOOD_KIND, PELLET } from './sim/food.ts';
 import { Organism } from './sim/organism.ts';
-import { radiusToMass, ticksPerSecond } from './sim/rules.ts';
+import { ticksPerSecond } from './sim/rules.ts';
 import { World } from './sim/world.ts';
 import { type Vec3, randomUnit, vec3 } from './sphere/vec3.ts';
 import type { Sfx } from './ui/audio.ts';
 import { HomeTracker, Trail } from './ui/home.ts';
 import { Hud } from './ui/hud.ts';
+import { HOME_POINTS, LAP_POINTS, eatPoints, explodePoints } from './ui/points.ts';
 import type { Minimap } from './ui/minimap.ts';
 
 export type GameState = 'menu' | 'playing' | 'dead';
@@ -133,7 +134,8 @@ export class Game {
 
     this.resize();
     const maze = this.world.maze;
-    const districtParam = Number(params.get('district'));
+    // `?district=` picks the start district; without it the world's rng does (Number(null) would be district 0).
+    const districtParam = params.has('district') ? Number(params.get('district')) : NaN;
     this.startDistrict = maze.enabled ? (Number.isInteger(districtParam) && districtParam >= 0 && districtParam < 12 ? districtParam : Math.floor(this.world.rng() * 12)) : -1;
     let start: Vec3;
     if (this.startDistrict >= 0) {
@@ -146,20 +148,7 @@ export class Game {
     if (maze.enabled) {
       this.camera.alignEnabled = params.get('align') !== '0';
       this.camera.mazeZoom = cfg.mazeZoom;
-      this.camera.district = (c, up, right) => {
-        const i = maze.regionWithGridAt(c, 1500);
-        if (i < 0 || !maze.isBuilt(i)) return 0;
-        const d = maze.district(i);
-        if (!d.locate(c)) return 0;
-        const G = d.G;
-        const lo = 8;
-        const out = Math.max(lo - d.gx, d.gx - (G - lo), lo - d.gy, d.gy - (G - lo), 0) * d.F;
-        d.axes(c, right, up);
-        up.x = -up.x;
-        up.y = -up.y;
-        up.z = -up.z;
-        return Math.max(0, 1 - out / 1500);
-      };
+      this.camera.district = districtView(maze);
     }
     this.camera.jumpTo(start, 64);
     this.world.observer = this.camera.frame.c;
@@ -402,7 +391,8 @@ export class Game {
     if (world.tick % 8 === 0) this.hud.setLeaderboard(world.leaderboard, this.human);
     if (this.state === 'dead' && now - this.deathAt > 1200) {
       this.state = 'menu';
-      this.hud.showMenu(`Eaten${this.killerName ? ` by ${this.killerName}` : ''} · peak mass ${Math.floor(this.human.peakMass)}`);
+      const points = this.arcade ? ` · ${this.points.toLocaleString('en-US')} points` : '';
+      this.hud.showMenu(`Eaten${this.killerName ? ` by ${this.killerName}` : ''}${points} · peak mass ${Math.floor(this.human.peakMass)}`);
       this.hud.setBanner('', '');
     }
     if (this.arcade) this.arcadeFrame(now);
@@ -445,11 +435,11 @@ export class Game {
       const ev = this.homeTracker.update(this.tmp);
       if (ev === 'home') {
         hud.toast('HOME AGAIN!', 1800, now);
-        this.addPoints(1000, this.tmp, now);
+        this.addPoints(HOME_POINTS, this.tmp, now);
         this.sfx?.home();
       } else if (ev === 'lap') {
         hud.toast(`AROUND THE WORLD! LAP ${this.homeTracker.laps}`, 2600, now);
-        this.addPoints(10000, this.tmp, now);
+        this.addPoints(LAP_POINTS, this.tmp, now);
         this.sfx?.lap();
       }
       this.warnRainbows(now);
@@ -572,21 +562,21 @@ export class Game {
       if (!this.arcade || !playing) continue;
       const at = this.tmp;
       switch (e.type) {
-        case 'eat':
-          if (e.eaterOrg !== human.id) break;
-          if (e.eatenKind === FOOD_KIND && e.foodKind === PELLET) {
-            // Every pellet scores the same, in the plains and in mazes.
-            this.addPoints(10, null, now);
-            this.sfx?.chomp();
-          } else if (e.eatenKind === FOOD_KIND && e.foodKind === POWER) {
-            this.addPoints(50, null, now);
-          } else if (e.foodKind === -1 && e.eatenKind === 0) {
+        case 'eat': {
+          // Every pellet scores the same, in the plains and in mazes; own cells merging back score nothing.
+          const n = eatPoints(e, human.id);
+          if (n <= 0) break;
+          if (e.eatenKind === FOOD_KIND) {
+            this.addPoints(n, null, now);
+            if (e.foodKind === PELLET) this.sfx?.chomp();
+          } else {
             at.x = e.x;
             at.y = e.y;
             at.z = e.z;
-            this.addPoints(Math.round(radiusToMass(e.r) * 10), at, now);
+            this.addPoints(n, at, now);
           }
           break;
+        }
         case 'pack':
           if (e.organismId === human.id && !this.packedToast) {
             this.packedToast = true;
@@ -612,7 +602,7 @@ export class Game {
             at.y = e.y;
             at.z = e.z;
             // 200 → 3 200 along a chain; the popup shows the chain length from the second explosion on.
-            this.addPoints(200 * 2 ** Math.min(e.k, 4), at, now, e.k > 0 ? ` ×${e.k + 1}` : '');
+            this.addPoints(explodePoints(e.k), at, now, e.k > 0 ? ` ×${e.k + 1}` : '');
             this.sfx?.boom(e.k);
           } else this.sfx?.hurt();
           break;

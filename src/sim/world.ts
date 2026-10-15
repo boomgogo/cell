@@ -2,7 +2,7 @@
 // active/dormant population. Runs in the browser, a Worker, or Node (arena, tests).
 import { type GameConfig, perSphere } from '../config/index.ts';
 import { type Rng, createRng } from '../core/rng.ts';
-import { MASK_GHOST, MASK_REGULAR } from '../maze/district.ts';
+import { type District, MASK_GHOST, MASK_REGULAR, type WallMask } from '../maze/district.ts';
 import { MazeWorld } from '../maze/walls.ts';
 import { Grid3 } from '../sphere/hash3.ts';
 import {
@@ -480,6 +480,7 @@ export class World {
         r: fr,
         hue: food.hue[i],
         eaterOrg: c.owner?.id ?? -1,
+        preyOrg: -1,
         foodKind: food.kind[i],
         foodTag: tag,
       });
@@ -541,6 +542,7 @@ export class World {
       r: prey.r,
       hue: prey.hue,
       eaterOrg: eater.owner?.id ?? -1,
+      preyOrg: prey.owner?.id ?? -1,
       foodKind: -1,
       foodTag: -1,
     });
@@ -674,11 +676,15 @@ export class World {
     if (tightX) {
       // Corridor runs along y.
       if (Math.abs(dy) < Math.abs(dx) * 0.577) return false;
+      const opening = this.openingAhead(dist, c.r, true, Math.sign(dy), mask);
+      if (opening !== null) return this.slideTo(c, right, opening, step);
       const off = (dist.dR - dist.dL) / 2;
       mx = Math.max(-0.3, Math.min(0.3, off / step)) * assist;
       my = Math.sign(dy);
     } else {
       if (Math.abs(dx) < Math.abs(dy) * 0.577) return false;
+      const opening = this.openingAhead(dist, c.r, false, Math.sign(dx), mask);
+      if (opening !== null) return this.slideTo(c, down, opening, step);
       const off = (dist.dB - dist.dT) / 2;
       my = Math.max(-0.3, Math.min(0.3, off / step)) * assist;
       mx = Math.sign(dx);
@@ -689,6 +695,56 @@ export class World {
     m.z = right.z * mx + down.z * my;
     if (normalize(m) < 1e-9) return false;
     moveAlong(c.p, m, step / this.R);
+    return true;
+  }
+
+  /**
+   * A corridor that narrows just ahead to an opening off our centre line (a two-tile corridor going on as a one-tile
+   * one, at one side): the sideways offset (world units, along the cross axis) to that opening's centre line, when the
+   * wall ahead is within reach and the opening is wide enough for us; else null. Without this, the assist centres a
+   * cell nearly as wide as the opening on the wide corridor's centre line and holds it against the wall's corner.
+   * `alongY`: the corridor runs along the grid's y axis (we move by `sign` in y). Uses the grid position `collide` left.
+   */
+  private openingAhead(d: District, r: number, alongY: boolean, sign: number, mask: WallMask): number | null {
+    const F = d.F;
+    const g = alongY ? d.gy : d.gx;
+    const cross = alongY ? d.gx : d.gy;
+    const lane = Math.floor(g);
+    // The next row (or column) of tiles ahead, and how far its edge is.
+    const next = sign > 0 ? lane + 1 : lane - 1;
+    const edge = (sign > 0 ? lane + 1 - g : g - lane) * F;
+    if (edge > r + F * 0.5) return null;
+    const half = r / F;
+    const lo = Math.floor(cross - half);
+    const hi = Math.floor(cross + half - 1e-9);
+    const open = (k: number) => !(alongY ? d.solid(k, next, mask) : d.solid(next, k, mask));
+    let blocked = false;
+    for (let k = lo; k <= hi; k++) if (!open(k)) blocked = true;
+    if (!blocked) return null;
+    // Runs of open tiles in that row near us; the nearest one we fit through.
+    let best: number | null = null;
+    for (let k = lo - 1; k <= hi + 1; k++) {
+      if (!open(k) || open(k - 1)) continue;
+      let end = k;
+      while (end + 1 <= hi + 2 && open(end + 1)) end++;
+      if ((end - k + 1) * F < 2 * r) continue;
+      const centre = (k + end + 1) / 2;
+      if (best === null || Math.abs(centre - cross) < Math.abs(best - cross)) best = centre;
+    }
+    return best === null ? null : (best - cross) * F;
+  }
+
+  /** Slides `c` sideways along unit tangent `axis` by `off` world units, at most `step` this tick. */
+  private slideTo(c: Cell, axis: Vec3, off: number, step: number): boolean {
+    if (Math.abs(off) < 0.5) return false;
+    const m = this.tmpB;
+    copy(m, axis);
+    if (off < 0) {
+      m.x = -m.x;
+      m.y = -m.y;
+      m.z = -m.z;
+    }
+    moveAlong(c.p, m, Math.min(Math.abs(off), step) / this.R);
     return true;
   }
 

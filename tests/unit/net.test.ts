@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DIFFICULTY } from '../../src/ai/personalities.ts';
 import { populateNpcs, populateResidents } from '../../src/ai/population.ts';
 import { arcadeConfig } from '../../src/config/arcade.ts';
+import { createRng } from '../../src/core/rng.ts';
 import type { GameConfig } from '../../src/config/types.ts';
 import type { Game, GameState } from '../../src/game.ts';
 import { HumanController } from '../../src/input/human.ts';
@@ -16,7 +17,9 @@ import { Reader, Writer } from '../../src/net/wire.ts';
 import { Camera } from '../../src/render/camera.ts';
 import { PLAYER } from '../../src/sim/cell.ts';
 import type { EatEvent } from '../../src/sim/events.ts';
+import { PELLET } from '../../src/sim/food.ts';
 import { Organism } from '../../src/sim/organism.ts';
+import { eatReach } from '../../src/sim/rules.ts';
 import { World } from '../../src/sim/world.ts';
 import { type Vec3, dot, vec3 } from '../../src/sphere/vec3.ts';
 import { eatPoints } from '../../src/ui/points.ts';
@@ -29,17 +32,27 @@ class Hub {
   readonly rooms: FakeRoom[] = [];
   hostId: number | null = null;
   readonly values = new Map<string, unknown>();
+  /** How long a message takes each way, in ticks of `clock` (a real server is a round trip away from everybody). */
+  lag = 0;
+  /** Up to this many ticks more for any one message, in order all the same (a connection's ups and downs). */
+  jitter = 0;
+  /** Ticks so far, for `lag` (run() counts them). */
+  clock = 0;
   /** Messages on their way: a server never hands one over before the sender's call returns. */
-  private readonly queue: (() => void)[] = [];
+  private readonly queue: { at: number; deliver: () => void }[] = [];
+  private lastAt = 0;
+  private readonly rand = createRng(7);
   private nextId = 1;
 
   post(deliver: () => void): void {
-    this.queue.push(deliver);
+    const at = Math.max(this.lastAt, this.clock + this.lag + Math.floor(this.rand() * (this.jitter + 1)));
+    this.lastAt = at;
+    this.queue.push({ at, deliver });
   }
 
-  /** Everything sent so far, and what that sends in turn. */
+  /** Everything sent so far that has arrived by now, and what that sends in turn. */
   flush(): void {
-    for (let n = 0; this.queue.length > 0 && n < 100_000; n++) this.queue.shift()!();
+    for (let n = 0; this.queue.length > 0 && this.queue[0].at <= this.clock && n < 100_000; n++) this.queue.shift()!.deliver();
   }
 
   join(name: string): FakeRoom {
@@ -272,6 +285,7 @@ let now = 1000;
 function run(host: Page, guests: Page[], ticks: number): void {
   const hub = host.room.hub;
   for (let t = 0; t < ticks; t++) {
+    hub.clock++;
     hub.flush();
     const g = host.game;
     g.world.step();
@@ -280,7 +294,7 @@ function run(host: Page, guests: Page[], ticks: number): void {
     hub.flush();
     now += g.cfg.tickMs;
     for (const guest of guests) {
-      guest.game.net?.frame(now);
+      guest.game.net?.frame(now, g.cfg.tickMs);
       hub.flush();
       // The guest's camera follows its colony, as Game.frame does.
       const h = guest.game.human;
@@ -525,4 +539,177 @@ describe('a room', () => {
     run(host, guests, 4);
     expect(colonyOf(host, last).cells.length).toBeGreaterThan(0);
   }, 30_000);
+});
+
+describe('a server a round trip away', () => {
+  /** A host and a guest who plays, with each message 200 ms on its way. */
+  function lagged(seed: number, jitter = 0): { host: Page; guest: Page } {
+    const hub = new Hub();
+    hub.lag = 5;
+    hub.jitter = jitter;
+    const host = page(hub, 'Ada', seed, 3);
+    const guest = page(hub, 'Grace', seed + 1, 7);
+    run(host, [guest], 15);
+    guest.play('Grace');
+    run(host, [guest], 40);
+    return { host, guest };
+  }
+
+  /** The guest's colony where its page draws it. */
+  function drawn(guest: Page): Vec3 {
+    const s = guest.net.status();
+    return vec3(s.human!.x, s.human!.y, s.human!.z);
+  }
+
+  /** The nearest pellet on the guest's page that its colony can reach in a straight line. */
+  function nearestPellet(guest: Page): Vec3 {
+    const world = guest.game.world;
+    const food = world.food;
+    const at = guest.game.human.center(vec3());
+    let best: Vec3 | null = null;
+    let bestD = Infinity;
+    food.query(at, 1500, (i) => {
+      if (!food.alive[i] || food.kind[i] !== PELLET) return;
+      const p = vec3(food.x[i], food.y[i], food.z[i]);
+      const d = world.distance(at, p);
+      if (d < guest.game.human.sumRadius + 40 || d >= bestD || world.maze.blocked(at, p)) return;
+      best = p;
+      bestD = d;
+    });
+    if (!best) throw new Error('no pellet in reach');
+    return best;
+  }
+
+  /** The guest's pointer `beyond` times as far from the screen's centre as `p` is, in its direction. */
+  function aimPast(guest: Page, p: Vec3, beyond: number): void {
+    const cam = guest.game.camera;
+    const s = { x: 0, y: 0 };
+    cam.toScreen(p, s);
+    guest.input.has = true;
+    Object.assign(guest.input, { x: cam.width / 2 + (s.x - cam.width / 2) * beyond, y: cam.height / 2 + (s.y - cam.height / 2) * beyond });
+  }
+
+  it('a guest’s own colony answers its pointer at once, and the host’s views keep it where the host has it', () => {
+    const { host, guest } = lagged(71);
+    const world = host.game.world;
+    const colony = colonyOf(host, guest);
+    const predicted = guest.net.status().predicted;
+    expect(predicted).not.toBeNull();
+    // Its page is ahead of the host's last view by about the round trip, ten ticks: less the tick the host steps with
+    // what came in just before it, and more while a view waits for the next view tick.
+    expect(predicted!.ahead).toBeGreaterThanOrEqual(9);
+    expect(predicted!.ahead).toBeLessThanOrEqual(11);
+    // Standing still, both pages have the colony in one place.
+    expect(world.distance(drawn(guest), colony.center(vec3()))).toBeLessThan(2);
+
+    const goal = nearestPellet(guest);
+    aimPast(guest, goal, 4);
+    const from = drawn(guest);
+    const hostFrom = colony.center(vec3());
+    run(host, [guest], 2);
+    // On the guest's page, a move toward the pointer at once (drawn between the page's last two ticks, as a page draws
+    // a world of its own). On the host, nothing yet: the steering is on its way.
+    expect(world.distance(from, drawn(guest))).toBeGreaterThan(5);
+    expect(world.distance(drawn(guest), goal)).toBeLessThan(world.distance(from, goal) - 5);
+    expect(world.distance(hostFrom, colony.center(vec3()))).toBeLessThan(1);
+
+    // Steering on: the host follows a round trip behind, and its views hardly move the guest's colony.
+    let worst = 0;
+    for (let t = 0; t < 60; t++) {
+      run(host, [guest], 1);
+      worst = Math.max(worst, guest.net.status().predicted?.correction ?? 0);
+    }
+    expect(world.distance(hostFrom, colony.center(vec3()))).toBeGreaterThan(300);
+    expect(worst).toBeLessThan(6);
+
+    // Let go: once the host has had the last of the steering, both pages have the colony in one place again.
+    guest.input.has = false;
+    run(host, [guest], 20);
+    expect(world.distance(drawn(guest), colony.center(vec3()))).toBeLessThan(2);
+  });
+
+  it('pellets go from under a guest’s own cells at once, and one the host never took comes back', () => {
+    const { host, guest } = lagged(81);
+    const world = guest.game.world;
+    const food = world.food;
+    const pellets = () => {
+      const out = new Map<string, Vec3>();
+      for (let i = 0; i < food.span; i++) {
+        if (food.alive[i] && food.kind[i] === PELLET) out.set(`${food.x[i]},${food.y[i]},${food.z[i]}`, vec3(food.x[i], food.y[i], food.z[i]));
+      }
+      return out;
+    };
+    // From now on the host eats nothing: whatever goes from the guest's page went ahead of it.
+    (host.game.world as unknown as { eatFood: () => void }).eatFood = () => {};
+    aimPast(guest, nearestPellet(guest), 4);
+    const ate = new Map<string, Vec3>();
+    let before = pellets();
+    for (let t = 0; t < 25; t++) {
+      run(host, [guest], 1);
+      const after = pellets();
+      const cells = guest.game.human.cells;
+      for (const [k, p] of before) if (!after.has(k) && cells.some((c) => world.distance(c.p, p) < c.r + 50)) ate.set(k, p);
+      // Nothing left under the cells where the page draws them.
+      for (const c of cells) {
+        const reach = eatReach(world.cfg, c.r, food.radius, false);
+        for (const p of after.values()) expect(world.distance(c.p, p)).toBeGreaterThan(reach - 0.5);
+      }
+      before = after;
+    }
+    expect(ate.size).toBeGreaterThan(0);
+
+    // Stop, and wait for the host, which never took them: each is back, but those under the colony now.
+    guest.input.has = false;
+    run(host, [guest], 50);
+    const now = pellets();
+    const cells = guest.game.human.cells;
+    let back = 0;
+    for (const [k, p] of ate) {
+      if (cells.some((c) => world.distance(c.p, p) < c.r + 20)) continue;
+      expect(now.has(k), `pellet ${k}`).toBe(true);
+      back++;
+    }
+    expect(back).toBeGreaterThan(0);
+  });
+
+  it('with a connection that comes and goes in fits, and frames of the guest’s own, its colony still hardly jumps', () => {
+    const { host, guest } = lagged(91, 3);
+    const hub = host.room.hub;
+    const world = host.game.world;
+    const colony = colonyOf(host, guest);
+    const rand = createRng(3);
+    aimPast(guest, nearestPellet(guest), 4);
+    const corrections: number[] = [];
+    // The host's ticks as run() makes them; between them, the guest's page draws frames 8 to 28 ms apart.
+    let spare = 0;
+    for (let t = 0; t < 80; t++) {
+      hub.clock++;
+      hub.flush();
+      host.game.world.step();
+      host.game.takeEvents(now);
+      host.net.stepped(now);
+      hub.flush();
+      spare += host.game.cfg.tickMs;
+      while (spare > 0) {
+        const dt = Math.min(spare, 8 + rand() * 20);
+        spare -= dt;
+        now += dt;
+        guest.net.frame(now, dt);
+        hub.flush();
+        const h = guest.game.human;
+        if (h.cells.length > 0) guest.game.camera.jumpTo(h.center(vec3()), h.sumRadius);
+        const p = guest.net.status().predicted;
+        if (p) corrections.push(p.correction);
+      }
+    }
+    // A whole move (15 to 18 units here) would be a step paired with the wrong tick of the page's.
+    corrections.sort((a, b) => a - b);
+    expect(corrections[Math.floor(corrections.length / 2)]).toBeLessThan(2);
+    expect(corrections[corrections.length - 1]).toBeLessThan(12);
+
+    // Let go: a round trip is up to 16 ticks now, and the colony comes to rest a little after the last of it.
+    guest.input.has = false;
+    run(host, [guest], 50);
+    expect(world.distance(drawn(guest), colony.center(vec3()))).toBeLessThan(2);
+  });
 });

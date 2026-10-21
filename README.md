@@ -140,8 +140,11 @@ is opened.
   so in a room the name can't be changed until the room is over. The panel (invite link, QR code, who is here, chat)
   shows only in a room: press **Friends**.
 - **One world, on the host's page.** The host's page runs the world, in full around every player. Each guest's page
-  draws what the host sends it, 12.5 times a second, and sends where it steers 20 times a second, so a guest's own
-  cells move a round trip after the mouse.
+  draws what the host sends it, 12.5 times a second, and sends where it steers 25 times a second.
+- **A guest's own cells answer the mouse at once.** A guest's page moves its own cells itself, with the world's own
+  movement and walls, and the host's views put them right (client-side prediction). Through 90 ms each way they
+  answer in about 50 ms instead of about half a second. Eating, splits and everything else are still the host's, a round
+  trip later; the pellets under a guest's cells go at once, and come back if the host never took them.
 - **Eight players at once, and anyone can watch.** The host's cost grows with how far apart the players are. On a
   low-end device (4× CPU throttling), eight in eight districts take the host's frame from 30 ms to about 41 ms: the
   world keeps real time, at a lower frame rate. Friends who stay together cost about what one player costs; see
@@ -205,7 +208,7 @@ Wi-Fi. `P3P2_DIR` points at another checkout. `npm run p3p2` also prints how to 
 - `src/ai` — NPC controller (context steering with a turning cost, wander goals and a progress detector so big NPCs keep exploring; personalities, maze routing), resident phages (`ghost.ts`), population
 - `src/render` — sphere camera (district alignment), Canvas 2D renderer (background patterns, cached static layer with walls/borders/emblems, pellets, spore orbs, jelly membranes, rainbow cells, explosion effects, fading eaten cells, lazy country flags), adaptive quality
 - `src/geo` — NPC countries by population, the player's country lookup
-- `src/net` — friends in one world through p3p2: the host's world and what it tells each guest, a guest's page drawing it, the save a new host carries on from (`Net.ts`), bytes on the wire (`wire.ts`), the room's rules (`rules.ts`)
+- `src/net` — friends in one world through p3p2: the host's world and what it tells each guest, a guest's page drawing it, the save a new host carries on from (`Net.ts`), a guest's own cells moved on its page (`predict.ts`), bytes on the wire (`wire.ts`), the room's rules (`rules.ts`)
 - `src/assets` — the generated flag atlas and its index
 - `src/input`, `src/ui`, `src/game.ts` — input, HUD/menu, arcade HUD (minimap, banner, home arrow), home/lap tracker, lazy sound, game loop
 - `ai/summary.md` — how the game is built and why, measured budgets, and open items

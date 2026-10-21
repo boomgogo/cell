@@ -31,8 +31,11 @@ export type GameState = 'menu' | 'playing' | 'dead';
 export interface GameNet {
   /** True on a guest's page: the world is the host's, and this page draws what the host sends it. */
   readonly drawing: boolean;
-  /** On a guest's page, once a frame: takes in what the host sent; returns how far between two reports to draw. */
-  frame(now: number): number;
+  /**
+   * On a guest's page, once a frame, `dt` ms after the last: takes in what the host sent, and moves this player's own
+   * cells on; returns how far between two reports to draw everything else.
+   */
+  frame(now: number, dt: number): number;
   /** On the host's page, after each step of the world. */
   stepped(now: number): void;
   /** PLAY. True when the room takes care of it: on a guest's page, the host puts the player in its world. */
@@ -467,8 +470,9 @@ export class Game {
     const t0 = performance.now();
     let alpha: number;
     if (this.net?.drawing) {
-      // A guest's page: the host's world, as the host last said, drawn between its last two reports.
-      alpha = this.net.frame(now);
+      // A guest's page: the host's world, as the host last said, drawn between its last two reports; its own cells
+      // it moves itself (net/predict.ts).
+      alpha = this.net.frame(now, dt);
     } else {
       this.acc += dt;
       while (this.acc >= tickMs && steps < 4) {

@@ -56,6 +56,34 @@ You chose two changes.
   through all 12 inks, navy and plum among them, at a different point on each cell. It now steps through seven rainbow
   inks in wheel order (red, orange, amber, green, emerald, cornflower, purple: the wheel's six and orange), 0.4 s each,
   the same on every rainbow cell and spore at once. Levels 0–4 are unchanged.
+- **A guest's own cells answer the mouse at once** (branch `exp-1`, `src/net/predict.ts`). You found steering laggy
+  for everyone but the host. A guest's steering went to the host and back through the server before its cells moved:
+  hub.p3p2.me is about 175 ms round trip from here, so with friends near you that is about 350 ms, and the game added
+  100–170 ms more. Worse, the steering was a point aimed from where the guest's screen had the colony half a second
+  ago, so near the cell the colony stalled or rocked, and turns went off at an angle. Now:
+  - the guest's page moves its own cells itself, a move a tick, with the world's own movement (`World.moveCells`:
+    steering, glides, holding apart, walls, packing; nothing eaten);
+  - each tick's steering goes to the host with the tick's number, 25 a second, kept relative to the colony; each
+    step on the host makes the move of one of the page's ticks, paired by the soonest the steering came in the last
+    two seconds, so the matching tick's steering is almost always there;
+  - each view says which of the page's ticks it stands for; the page puts its cells where the host has them and plays
+    its steering since that tick over again (client-side prediction with server reconciliation); what is left over
+    fades out on screen in about 0.1 s;
+  - pellets under the cells go at once, and come back after 1.5 s if the host never took them.
+
+  Through p3p2's lag proxy, from the mouse moving to the guest's colony being 10 units nearer to the pointer, the
+  median of 12 tries (`latency.spec.ts` in the session's scratchpad; the host's own colony 13–31 ms):
+
+  | Each way | Before | Now |
+  |---|---|---|
+  | 90 ms | 485 ms | 35–50 ms (two runs) |
+  | 150 ms | 745 ms | 47 ms |
+
+  Before, a guest's colony also never came to rest with the mouse on it. Still a round trip late: splits and ejects,
+  eating (a cell grows when the host says), and everything the host does to a guest's cells (explosions, bounces,
+  merges), which shows as the cells moving to where the host has them. Solo play is unchanged (a seed-70 world, 3,000
+  ticks, hashed every second: the same hash before and after). The room code is 10.0 KB gzip (8.0 before), still
+  only in a room; initial load 54.8 KB.
 
 ## Found and fixed
 
@@ -121,15 +149,18 @@ full around N district start tiles, on the i7-7700HQ / HD 630 laptop, frame p95 
 
 ## Tests
 
-- **`npm test`:** 169 of 169. New in `tests/unit/net.test.ts`, which runs a host and guests in Node through an
-  in-memory room:
+- **`npm test`:** 172 of 172. New in `tests/unit/net.test.ts`, which runs a host and guests in Node through an
+  in-memory room (which can hold messages back, and back more for some):
   - wire round trip;
   - the rules;
   - a guest drawing the host's world, starting in its district, and steering;
   - starting near a playing host;
   - own merges paying nothing;
   - the next player carrying on from the save;
-  - the cap, held colonies, and a colony that is away holding no place.
+  - the cap, held colonies, and a colony that is away holding no place;
+  - 200 ms each way: a guest's colony answering at once and the host's views moving it under 6 units; pellets going
+    at once and coming back; and with 0–120 ms more on any message and frames of the guest's own, corrections of
+    0.2 units typically and at most 12 (a step paired with the wrong tick would be a whole move, 15–18 units).
 
   `tests/unit/version.test.ts` covers the version.
 - **`npm run e2e`:** 29 passed. The 9 multiplayer tests run in the desktop project only.
@@ -149,7 +180,7 @@ full around N district start tiles, on the i7-7700HQ / HD 630 laptop, frame p95 
 
 ## Not verified
 
-- **How steering feels as a guest.** A guest's cells move a round trip after the mouse, with no prediction.
+- **How steering feels as a guest**, now that its own cells move at once, with real people on real connections.
 - Two real people, on real devices, through hub.p3p2.me or a server of yours over https/wss, from the deployed site.
   The room's game URL must be `https://c0.muon.day/`.
 - WebKit (Safari's engine).
@@ -163,4 +194,5 @@ full around N district start tiles, on the i7-7700HQ / HD 630 laptop, frame p95 
 3. **The save is most of what a host sends.** Sending it less often, or only what changed, would cut the host's
    upload about in half.
 4. **WebKit:** install its libraries and run `npm run e2e:engines`.
-5. **Prediction for a guest's own cells**, if steering feels late.
+5. **Splits and ejects for a guest at once too**, if they feel late: the page could launch its own pieces and let
+   the host's ids take them over.

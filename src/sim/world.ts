@@ -489,14 +489,14 @@ export class World {
   }
 
   /** Is either cell still in its first splitNoCollideTicks (a split piece flies out through its parent)? */
-  private justSplit(a: Cell, b: Cell): boolean {
+  private justSplit(a: Cell, b: Cell, tick = this.tick): boolean {
     const t = this.cfg.splitNoCollideTicks;
-    return this.tick - a.bornTick < t || this.tick - b.bornTick < t;
+    return tick - a.bornTick < t || tick - b.bornTick < t;
   }
 
   /** Cells of one organism hold each other apart until both may merge, apart from fresh split pieces. */
-  private keepApart(a: Cell, b: Cell): boolean {
-    return a.owner !== null && a.owner === b.owner && !this.justSplit(a, b) && !(a.canMerge && b.canMerge);
+  private keepApart(a: Cell, b: Cell, tick = this.tick): boolean {
+    return a.owner !== null && a.owner === b.owner && !this.justSplit(a, b, tick) && !(a.canMerge && b.canMerge);
   }
 
   private eatFood(c: Cell): void {
@@ -801,42 +801,72 @@ export class World {
    * move may never leave a cell tighter than it was (clamped to its radius): it backs off toward where the tick started.
    */
   private resolveWalls(): void {
-    const maze = this.maze;
-    const tmp = this.tmpC;
     for (const c of this.cells) {
       if (c.removed) continue;
       if (!c.owner && c.boost <= 0) continue;
-      if (maze.regionWithGridAt(c.p, c.r + 200) < 0) {
-        c.squeeze = 1;
-        c.clearance = Infinity;
-        // Packed mass comes back out in the plains too.
-        if (c.owner && c.packed > 0) this.fitCell(c);
-        continue;
-      }
-      const mask = c.owner?.species.passesDoor ? MASK_GHOST : MASK_REGULAR;
-      c.squeeze = maze.resolve(c.p, c.r, mask);
-      let min = maze.lastMin;
-      const allowed = Math.min(c.r, c.clearance) - 0.5;
-      if (min < allowed && maze.clearanceAt(c.prev, c.r, mask) >= allowed) {
-        // Largest step from the tick's start toward the resolved spot that keeps the allowed clearance.
-        let lo = 0;
-        let hi = 1;
-        for (let k = 0; k < 6; k++) {
-          const mid = (lo + hi) / 2;
-          nlerp(tmp, c.prev, c.p, mid);
-          if (maze.clearanceAt(tmp, c.r, mask) >= allowed) lo = mid;
-          else hi = mid;
-        }
-        nlerp(tmp, c.prev, c.p, lo);
-        copy(c.p, tmp);
-        c.squeeze = maze.resolve(c.p, c.r, mask);
-        min = maze.lastMin;
-      }
-      c.clearance = min;
-      // Then fit the way out from where the walls left it. A cell that grew, merged, woke or was rescued in a
-      // pocket packs (it may have been wedged for this one tick); one that only needed a nudge off a wall got it above.
-      if (c.owner) this.fitCell(c);
+      this.resolveWall(c);
     }
+  }
+
+  /** Step 6 for one cell. */
+  private resolveWall(c: Cell): void {
+    const maze = this.maze;
+    const tmp = this.tmpC;
+    if (maze.regionWithGridAt(c.p, c.r + 200) < 0) {
+      c.squeeze = 1;
+      c.clearance = Infinity;
+      // Packed mass comes back out in the plains too.
+      if (c.owner && c.packed > 0) this.fitCell(c);
+      return;
+    }
+    const mask = c.owner?.species.passesDoor ? MASK_GHOST : MASK_REGULAR;
+    c.squeeze = maze.resolve(c.p, c.r, mask);
+    let min = maze.lastMin;
+    const allowed = Math.min(c.r, c.clearance) - 0.5;
+    if (min < allowed && maze.clearanceAt(c.prev, c.r, mask) >= allowed) {
+      // Largest step from the tick's start toward the resolved spot that keeps the allowed clearance.
+      let lo = 0;
+      let hi = 1;
+      for (let k = 0; k < 6; k++) {
+        const mid = (lo + hi) / 2;
+        nlerp(tmp, c.prev, c.p, mid);
+        if (maze.clearanceAt(tmp, c.r, mask) >= allowed) lo = mid;
+        else hi = mid;
+      }
+      nlerp(tmp, c.prev, c.p, lo);
+      copy(c.p, tmp);
+      c.squeeze = maze.resolve(c.p, c.r, mask);
+      min = maze.lastMin;
+    }
+    c.clearance = min;
+    // Then fit the way out from where the walls left it. A cell that grew, merged, woke or was rescued in a
+    // pocket packs (it may have been wedged for this one tick); one that only needed a nudge off a wall got it above.
+    if (c.owner) this.fitCell(c);
+  }
+
+  /**
+   * One tick of movement for cells of `org` that are not in this world, as `step` moves an organism's cells: glide,
+   * steer toward `org.target`, hold each other apart, walls and packing. Nothing else: nothing is eaten, nothing else
+   * moves, and no event is told. `tick` is the tick they move in. For a guest's page in a room, which moves its own
+   * cells at once and lets the host's views correct them (net/predict.ts).
+   */
+  moveCells(org: Organism, cells: readonly Cell[], tick: number): void {
+    const cfg = this.cfg;
+    const events = this.events.length;
+    for (const c of cells) {
+      copy(c.prev, c.p);
+      c.canMerge = tick - c.bornTick >= mergeDelayTicks(cfg, c);
+      if (c.boost > 0) this.glide(c);
+      this.movePlayerCell(c, org);
+    }
+    for (let i = 0; i < cells.length; i++) {
+      for (let j = i + 1; j < cells.length; j++) {
+        if (this.keepApart(cells[i], cells[j], tick)) this.pushApart(cells[i], cells[j]);
+      }
+    }
+    if (this.maze.enabled) for (const c of cells) this.resolveWall(c);
+    // Packing's events are the host's to tell.
+    this.events.length = events;
   }
 
   /**

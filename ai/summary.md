@@ -54,7 +54,7 @@ What keeps the initial load small:
 | `src/render` | Sphere camera, Canvas 2D renderer, cached static layer, membranes, effects, palette, adaptive quality |
 | `src/input`, `src/ui`, `src/game.ts` | Pointer/touch/keyboard input, HUD and menu, minimap, home cues, sound, the game loop |
 | `src/config` | Every tunable in one `GameConfig`, in three presets (§4) |
-| `src/net` | Friends in one world through p3p2: the host's side and the guest's side (`Net.ts`), bytes on the wire, the room's rules |
+| `src/net` | Friends in one world through p3p2: the host's side and the guest's side (`Net.ts`), a guest's own cells moved on its page (`predict.ts`), bytes on the wire, the room's rules |
 
 The key decisions, and why:
 
@@ -93,7 +93,12 @@ The key decisions, and why:
   engines differ in the last bit of `Math.sin`, and each page builds its districts, and so grows its food, in its own
   idle time.
   - The host's page simulates in full around every player (`World.observers`). A guest's page draws what the host
-    sends it (12.5 views a second, one `room.sendEach` for all guests) and sends its steering (20 a second).
+    sends it (12.5 views a second, one `room.sendEach` for all guests) and sends its steering (25 a second).
+  - A guest's page moves its own cells itself (`net/predict.ts`, branch exp-1): each tick's steering goes with the
+    tick's number, each step on the host makes one of those ticks' moves, and each view says which tick it stands for.
+    The page puts its cells where the host has them and plays its steering since then over again (`World.moveCells`:
+    steering, walls, holding apart, packing). Steering is kept relative to the colony, so the round trip doesn't bend
+    it. Pellets under the cells go at once and come back after 1.5 s if the host never took them.
   - Every 5 s the host sends a packed save (about 35 KB), and the next player carries the world on from it.
   - At most eight play at once (`MAX_PLAYERS`): the host's cost grows with how far apart the players are, to a frame
     p95 of about 41 ms at 4× throttling for eight in eight districts. Anyone else watches. A newcomer looks where the
@@ -316,5 +321,6 @@ RTX 3060, earlier iterations an Intel RPL-P integrated GPU with similar frame nu
 - **UI ideas not done.** Retitle the leaderboard, move the score into the arcade HUD, rework the menu layout.
 - **Deploy.** Static hosting with brotli and immutable asset caching has not been set up.
 - **Friends.** Eight can play at once. Spread over eight districts they take a low-end host to about 41 ms a frame
-  (30 alone): a cheaper world around each extra player would bring that back under 33 ms. A guest's own cells move a
-  round trip after the mouse, with no prediction. Nobody has judged the feel by playing, or tried WebKit (it needs system libraries here).
+  (30 alone): a cheaper world around each extra player would bring that back under 33 ms. A guest's own cells answer the
+  mouse at once (prediction, branch exp-1), but its splits, ejects and eating still come a round trip later. Nobody
+  has judged the feel by playing, or tried WebKit (it needs system libraries here).

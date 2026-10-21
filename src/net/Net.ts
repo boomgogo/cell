@@ -5,12 +5,14 @@
 //
 // - One world, on the host's page. It is simulated in full around every player, not only around the camera
 //   (`World.observers`). A guest's colony is an organism in it, steered by what the guest's page says it wants
-//   (`in`, twenty times a second): where to go, splits and ejects.
+//   (`in`, each of the page's ticks): where to go, splits and ejects. Where to go is kept relative to the colony, so
+//   that the round trip does not bend it.
 // - What each guest sees, the host tells that guest alone, about twelve times a second (`v`): the cells and the
 //   food near it, and what happened there. All of it goes out as one message with a part for each guest
 //   (`room.sendEach`), which the server counts once against the host's rate.
 // - A guest's page draws that: its own world stands still, and holds the host's cells and food in place of its
-//   own (`drawing`).
+//   own (`drawing`). Its own colony's cells it moves itself, at once, and the host's views put them right
+//   (predict.ts); the pellets they pass over go at once too, and come back if the host never took them.
 // - Every five seconds the host sends everybody a save of the world (`sv`): every colony and every cell, not the
 //   food. When the host goes, the next player makes a world from the save and carries on.
 // - At most MAX_PLAYERS play at once (the host's page runs the world for all of them); more can watch. A player who
@@ -26,10 +28,13 @@ import { HumanController } from '../input/human.ts';
 import { Cell, EJECTED, PLAYER, VIRUS, type CellKind } from '../sim/cell.ts';
 import type { Controller } from '../sim/controller.ts';
 import type { EatenKind, SimEvent } from '../sim/events.ts';
+import { PELLET } from '../sim/food.ts';
 import { Organism } from '../sim/organism.ts';
+import { bigEnoughToEat, eatReach } from '../sim/rules.ts';
 import { ghostSpecies } from '../sim/species.ts';
 import type { World } from '../sim/world.ts';
-import { type Vec3, copy, dot, vec3 } from '../sphere/vec3.ts';
+import { type Vec3, copy, dot, transport, vec3 } from '../sphere/vec3.ts';
+import { type HostCell, Prediction } from './predict.ts';
 import { type Rules, rulesDiffer, withRules, worldRules } from './rules.ts';
 import { Reader, Writer, deflate, inflate } from './wire.ts';
 
@@ -37,7 +42,11 @@ import { Reader, Writer, deflate, inflate } from './wire.ts';
 const VIEW_TICKS = 2;
 const VIEW_MS = 80;
 const SAVE_MS = 5000;
-const INTENT_MS = 50;
+/** A pellet a guest's own cells ate ahead of the host comes back after this long (ms) if the host never took it. */
+const EAT_AHEAD_MS = 1500;
+/** A cell in a view: new to the guest (its owner and hue follow), or one of the guest's own (how it moves follows). */
+const CELL_NEW = 128;
+const CELL_OWN = 64;
 /** A view reaches this much past the edge of the guest's screen, so what comes into sight is already there. */
 const VIEW_MARGIN = 600;
 const BOARD_SIZE = 10;
@@ -88,15 +97,65 @@ const EV_UNPACK = 8;
 const PERSONALITY_IDS = Object.keys(PERSONALITIES) as PersonalityId[];
 const DIFFICULTY_IDS = Object.keys(DIFFICULTY) as (keyof typeof DIFFICULTY)[];
 
-/** A guest's colony on the host: it wants what the guest's page last said. */
+/** Ticks of a guest's steering the host keeps, to pick the one for each step. */
+const STEER_KEPT = 16;
+/** Steps over which the host looks for the steering that came soonest (two seconds). */
+const STEER_WINDOW = 50;
+
+/**
+ * A guest's colony on the host: it wants what the guest's page said. Each of the page's ticks comes with its number,
+ * and the page moves the colony itself, a tick at a time: each step here makes the move of one of its ticks, with that
+ * tick's steering, so that the page can play the same moves over again (predict.ts). Steering takes longer some times
+ * than others: the steps pair with the page's ticks by the soonest it came in lately, so that a step's own steering is
+ * almost always here by then.
+ */
 class RemoteController implements Controller {
+  /** Where the colony goes before the page has steered (where it was put). */
   readonly target: Vec3 = vec3(0, 0, 1);
+  /** The page's last ticks of steering: the tick, the aim, and where the page had the colony then. */
+  private readonly steer: { tick: number; aim: Vec3; from: Vec3 }[] = [];
   splits = 0;
   ejects = 0;
   private splitsDone = -1;
   private ejectsDone = -1;
   /** The guest's page is in the background or its connection is down: the colony stays where it is. */
   held = false;
+  /** The page's newest tick less this world's tick, at each of the last STEER_WINDOW steps. */
+  private readonly ahead = new Int32Array(STEER_WINDOW);
+  private seen = 0;
+  /** This world's tick at the last step that steered the colony. */
+  private steppedAt = -1;
+  /** The page's tick that a step of this world's `tick` makes the move of is `tick + offset`. */
+  private offset = 0;
+  private readonly here = vec3();
+
+  /** One tick of the page's steering: where the pointer is, and where the page had the colony. */
+  steering(tick: number, aim: Vec3, from: Vec3): void {
+    const steer = this.steer;
+    const last = steer[steer.length - 1];
+    // Splits and ejects go at once, between ticks: a second word for the same tick.
+    if (last && tick === last.tick) {
+      copy(last.aim, aim);
+      copy(last.from, from);
+      return;
+    }
+    if (last && tick < last.tick) {
+      // A page that started again counts its ticks from the start again.
+      if (last.tick - tick <= STEER_KEPT) return;
+      this.restart();
+    }
+    const old = steer.length >= STEER_KEPT ? steer.shift()! : { tick: 0, aim: vec3(), from: vec3() };
+    old.tick = tick;
+    copy(old.aim, aim);
+    copy(old.from, from);
+    steer.push(old);
+  }
+
+  /** The page started again (a reload): its ticks with it. */
+  restart(): void {
+    this.steer.length = 0;
+    this.seen = 0;
+  }
 
   /** The guest's counts of splits and ejects so far: each one more than last time is one more to do. */
   wants(splits: number, ejects: number): void {
@@ -106,13 +165,32 @@ class RemoteController implements Controller {
     this.ejects = ejects;
   }
 
-  update(_world: World, org: Organism): void {
+  update(world: World, org: Organism): void {
     if (this.held) {
       // Not where the pointer last was: a page in the background is not steering.
       if (org.cells.length > 0) org.center(org.target);
       return;
     }
+    const steer = this.steer;
     copy(org.target, this.target);
+    // After a gap (the colony was dead, or its page away), what came soonest before says nothing of now.
+    if (world.tick - this.steppedAt > 1) this.seen = 0;
+    this.steppedAt = world.tick;
+    if (steer.length > 0) {
+      // Pair this step with one of the page's ticks.
+      const newest = steer[steer.length - 1].tick - world.tick;
+      this.ahead[this.seen++ % STEER_WINDOW] = newest;
+      let soonest = newest;
+      for (let i = Math.min(this.seen, STEER_WINDOW) - 1; i >= 0; i--) soonest = Math.min(soonest, this.ahead[i]);
+      this.offset = soonest;
+      // That tick's steering, or the last before it that came (or, if none is that old, the oldest here).
+      const want = world.tick + this.offset;
+      let pick = steer[0];
+      for (const s of steer) if (s.tick <= want) pick = s;
+      // The pointer as far and in the same direction from the colony as it was on the page.
+      copy(org.target, pick.aim);
+      if (org.cells.length > 0) transport(org.target, pick.from, org.center(this.here));
+    }
     if (this.splits !== this.splitsDone) {
       org.wantSplit = true;
       this.splitsDone = (this.splitsDone + 1) & 0xffff;
@@ -121,6 +199,11 @@ class RemoteController implements Controller {
       org.wantEject = true;
       this.ejectsDone = (this.ejectsDone + 1) & 0xffff;
     }
+  }
+
+  /** The page's tick that this world's state after `tick` stands for (NONE before it steered). */
+  echo(tick: number): number {
+    return this.seen > 0 ? Math.max(0, tick + this.offset) : NONE;
   }
 }
 
@@ -170,7 +253,14 @@ export class Net implements GameNet {
   private pending: Uint8Array[] = [];
   private splits = 0;
   private ejects = 0;
-  private intentAt = 0;
+  /** This player's own cells, moved here at once and put right by the host's views. */
+  private readonly predict = new Prediction();
+  /** What the newest view said of this player's own cells, for the prediction. */
+  private own: { tick: number; echo: number; cells: HostCell[] } | null = null;
+  /** The host's slot of each food item here, by this page's slot. */
+  private readonly foodHost = new Map<number, number>();
+  /** Pellets this player's cells ate here ahead of the host, by the host's slot, until the host says it took them. */
+  private readonly ateAhead = new Map<number, { p: Vec3; hue: number; kind: number; at: number }>();
   private board: { id: number; human: boolean; mass: number; name: string; country: string }[] = [];
   /** Where the host looks, as it last said. */
   private readonly hostLook = vec3(0, 0, 1);
@@ -214,7 +304,10 @@ export class Net implements GameNet {
       }),
       // A guest's page that has just started (a reload keeps the member) has nothing: its picture starts again.
       room.on('fresh', (_data, from) => {
-        if (room.isHost && from) this.guestOf(from).fresh = true;
+        if (!room.isHost || !from) return;
+        const guest = this.guestOf(from);
+        guest.fresh = true;
+        guest.controller.restart();
       }),
       // The host has no room for another colony: back to the menu, saying so.
       room.on('full', (data, from) => {
@@ -348,14 +441,17 @@ export class Net implements GameNet {
     try {
       const r = new Reader(data);
       if (r.u8() !== KIND_INTENT) return;
-      r.unit(guest.controller.target);
+      const tick = r.u32();
+      const aim = r.unit(vec3());
+      const from = r.unit(vec3());
       const splits = r.u16();
       const ejects = r.u16();
       r.unit(guest.center);
       guest.radius = Math.min(20000, r.u16());
       guest.controller.wants(splits, ejects);
+      guest.controller.steering(tick, aim, from);
     } catch {
-      // Not whole: the next one is a twentieth of a second away.
+      // Not whole: the next one is a tick away.
     }
   }
 
@@ -489,7 +585,7 @@ export class Net implements GameNet {
       guest.fresh = false;
     }
     const board = world.tick % 8 < VIEW_TICKS;
-    w.u8(KIND_VIEW).u32(world.tick).u32(org?.id ?? 0).u8((fresh ? 1 : 0) | (board ? 2 : 0));
+    w.u8(KIND_VIEW).u32(world.tick).u32(org?.id ?? 0).u32(guest.controller.echo(world.tick)).u8((fresh ? 1 : 0) | (board ? 2 : 0));
     // A new picture says where to look: at the guest's own colony, or where the host looks, so that friends start in
     // one district (each page's own world seed would put each in its own).
     if (fresh) w.unit(playing(org) ? org!.center(vec3()) : this.game.camera.frame.c);
@@ -517,9 +613,13 @@ export class Net implements GameNet {
     w.u16(cells.length);
     for (const c of cells) {
       const known = guest.cells.has(c.id);
+      const own = org !== null && c.owner === org;
       seen.add(c.id);
-      w.u32(c.id).u8(c.kind | (known ? 0 : 128)).unit(c.p).f32(c.r).f32(c.packed);
+      w.u32(c.id).u8(c.kind | (known ? 0 : CELL_NEW) | (own ? CELL_OWN : 0)).unit(c.p).f32(c.r).f32(c.packed);
       if (!known) w.u32(c.owner?.id ?? NONE).u16(c.hue);
+      // The guest's page moves its own cells itself, from here: how they glide, since when they may merge, and how the
+      // walls held them (no wall near is -1).
+      if (own) w.f32(c.boost).unit(c.heading).u32(c.bornTick).f32(c.squeeze).f32(Number.isFinite(c.clearance) ? c.clearance : -1);
     }
     guest.cells = seen;
 
@@ -638,7 +738,7 @@ export class Net implements GameNet {
     // The maze is still built here, for its walls; the food it would grow is the host's.
     world.maze.onBuilt = null;
     world.events.length = 0;
-    this.foodIndex.clear();
+    this.forgetPicture();
     this.orgs.clear();
     this.pending = [];
     this.me = 0;
@@ -690,32 +790,85 @@ export class Net implements GameNet {
       .catch(() => {});
   }
 
-  /** Once a frame on a guest's page: the host's views since the last frame, and where between two to draw. */
-  frame(now: number): number {
+  /**
+   * Once a frame on a guest's page, `dt` ms after the last: the host's views since the last frame, this player's own
+   * cells moved on, and where between the host's two last views to draw everything else.
+   */
+  frame(now: number, dt: number): number {
     const room = this.room;
     if (!room) return 1;
     for (const bytes of this.pending) this.apply(bytes, now);
     this.pending = [];
-    this.intent(now, room);
+    const game = this.game;
+    const own = this.own;
+    this.own = null;
+    if (own) {
+      if (own.echo === NONE || own.cells.length === 0) this.predict.clear();
+      else this.predict.correct(game.world, game.human, own.cells, own.tick, own.echo);
+    }
+    this.intent(dt, room);
+    this.predict.draw(game.world, dt, game.cfg.tickMs);
+    this.eatAhead(now);
     if (this.viewAt === 0) return 1;
     return Math.min(1, Math.max(0, (now - this.viewAt) / VIEW_MS));
   }
 
-  /** What this player wants, to the host: where the pointer is, splits and ejects so far, and what it can see. */
-  private intent(now: number, room: Room): void {
-    const human = this.game.human;
-    human.controller.update(this.game.world, human);
+  /**
+   * What this player wants, to the host, each tick of this page's: where the pointer is and where the colony was then
+   * (as this page has it), splits and ejects so far, and what it can see. Splits and ejects go at once.
+   */
+  private intent(dt: number, room: Room): void {
+    const game = this.game;
+    const human = game.human;
+    human.controller.update(game.world, human);
     if (human.wantSplit) this.splits = (this.splits + 1) & 0xffff;
     if (human.wantEject) this.ejects = (this.ejects + 1) & 0xffff;
     const urgent = human.wantSplit || human.wantEject;
     human.wantSplit = false;
     human.wantEject = false;
-    if (!urgent && now - this.intentAt < INTENT_MS) return;
-    this.intentAt = now;
-    const w = new Writer(32);
-    w.u8(KIND_INTENT).unit(human.target).u16(this.splits).u16(this.ejects).unit(this.game.camera.frame.c);
-    w.u16(Math.ceil(this.game.camera.viewRadius()));
+    const ticks = this.predict.advance(game.world, human, dt, game.cfg.tickMs);
+    if (!urgent && ticks === 0) return;
+    const w = new Writer(40);
+    w.u8(KIND_INTENT).u32(this.predict.tick).unit(human.target).unit(this.predict.from).u16(this.splits).u16(this.ejects);
+    w.unit(game.camera.frame.c).u16(Math.ceil(game.camera.viewRadius()));
     room.send('in', w.bytes(), { to: 'host', volatile: !urgent });
+  }
+
+  /**
+   * The pellets under this player's cells, where this page has them, go at once: the host takes them a round trip
+   * later, and says so. One the host has not taken by EAT_AHEAD_MS (this page's cells were not where the host's went)
+   * comes back.
+   */
+  private eatAhead(now: number): void {
+    const world = this.game.world;
+    const food = world.food;
+    const cfg = world.cfg;
+    const fr = food.radius;
+    const eaten: number[] = [];
+    // Only where this page moves the cells itself: else they are drawn where the host has them, and it says.
+    const mine = this.predict.active ? this.game.human.cells : [];
+    for (const c of mine) {
+      if (!c.owner?.species.eatsFood || !bigEnoughToEat(cfg, c.r, fr)) continue;
+      const cosReach = Math.cos(eatReach(cfg, c.r, fr, false) / world.R);
+      food.query(c.p, c.r, (i) => {
+        if (food.alive[i] && food.kind[i] === PELLET && c.p.x * food.x[i] + c.p.y * food.y[i] + c.p.z * food.z[i] > cosReach) eaten.push(i);
+      });
+    }
+    for (const i of eaten) {
+      const host = this.foodHost.get(i);
+      if (host === undefined || !food.alive[i]) continue;
+      this.ateAhead.set(host, { p: vec3(food.x[i], food.y[i], food.z[i]), hue: food.hue[i], kind: food.kind[i], at: now });
+      food.remove(i);
+      this.foodHost.delete(i);
+      this.foodIndex.delete(host);
+    }
+    for (const [host, f] of this.ateAhead) {
+      if (now - f.at < EAT_AHEAD_MS) continue;
+      this.ateAhead.delete(host);
+      const i = food.add(f.p, f.hue, f.kind);
+      this.foodIndex.set(host, i);
+      this.foodHost.set(i, host);
+    }
   }
 
   play(name: string, hue: number): boolean {
@@ -739,11 +892,14 @@ export class Net implements GameNet {
     try {
       world.tick = r.u32();
       this.me = r.u32();
+      const echo = r.u32();
       const flags = r.u8();
       if (flags & 1) {
         world.clearCells();
         for (const i of this.foodIndex.values()) world.food.remove(i);
         this.foodIndex.clear();
+        this.foodHost.clear();
+        this.ateAhead.clear();
         const look = r.unit(vec3());
         if (game.state !== 'playing') game.lookAt(look);
       }
@@ -767,6 +923,7 @@ export class Net implements GameNet {
       }
 
       const seen = new Set<number>();
+      const mine: HostCell[] = [];
       const p = vec3();
       for (let n = r.u16(); n > 0; n--) {
         const id = r.u32();
@@ -775,7 +932,7 @@ export class Net implements GameNet {
         const radius = r.f32();
         const packed = r.f32();
         let cell = world.cellsById.get(id);
-        if (k & 128) {
+        if (k & CELL_NEW) {
           const owner = r.u32();
           const hue = r.u16();
           if (!cell) {
@@ -784,8 +941,20 @@ export class Net implements GameNet {
             world.putCell(cell);
           }
         }
+        if (k & CELL_OWN) {
+          const boost = r.f32();
+          const heading = r.unit(vec3());
+          const bornTick = r.u32();
+          const squeeze = r.f32();
+          const clear = r.f32();
+          const clearance = clear < 0 ? Infinity : clear;
+          if (cell) mine.push({ id, p: vec3(p.x, p.y, p.z), r: radius, packed, boost, heading, bornTick, squeeze, clearance, hue: cell.hue });
+        }
         if (!cell) continue;
         seen.add(id);
+        // This player's own cells stay where this page moves them (the pointer aims from there); the view puts them
+        // right through the prediction.
+        if ((k & CELL_OWN) !== 0 && this.predict.cells.has(id)) continue;
         // From where it was drawn, to where the host has it now.
         lerpInto(cell.prev, cell.prev, cell.p, was);
         copy(cell.p, p);
@@ -794,13 +963,19 @@ export class Net implements GameNet {
       }
       for (const c of world.cells) if (!seen.has(c.id)) world.dropCell(c);
       world.reindex();
+      this.own = { tick: world.tick, echo, cells: mine };
 
       const food = world.food;
       for (let n = r.u16(); n > 0; n--) {
         const host = r.u32();
         const i = this.foodIndex.get(host);
-        if (i !== undefined) food.remove(i);
+        if (i !== undefined) {
+          food.remove(i);
+          this.foodHost.delete(i);
+        }
         this.foodIndex.delete(host);
+        // Eaten here ahead of the host, and now there too.
+        this.ateAhead.delete(host);
       }
       for (let n = r.u16(); n > 0; n--) {
         const host = r.u32();
@@ -808,8 +983,14 @@ export class Net implements GameNet {
         const hue = r.u16();
         const kind = r.u8();
         const old = this.foodIndex.get(host);
-        if (old !== undefined) food.remove(old);
-        this.foodIndex.set(host, food.add(p, hue, kind));
+        if (old !== undefined) {
+          food.remove(old);
+          this.foodHost.delete(old);
+        }
+        this.ateAhead.delete(host);
+        const i = food.add(p, hue, kind);
+        this.foodIndex.set(host, i);
+        this.foodHost.set(i, host);
       }
 
       world.events.length = 0;
@@ -898,7 +1079,7 @@ export class Net implements GameNet {
     }
     game.replaceWorld(world, human);
     this.orgs.clear();
-    this.foodIndex.clear();
+    this.forgetPicture();
     this.viewAt = 0;
     for (const guest of this.guests.values()) guest.fresh = true;
   }
@@ -1037,8 +1218,17 @@ export class Net implements GameNet {
     world.addOrganism(human);
     game.replaceWorld(world, human);
     this.orgs.clear();
-    this.foodIndex.clear();
+    this.forgetPicture();
     this.save = null;
+  }
+
+  /** The host's food and this player's own cells as this page had them: a new picture, or a world of this page's. */
+  private forgetPicture(): void {
+    this.foodIndex.clear();
+    this.foodHost.clear();
+    this.ateAhead.clear();
+    this.predict.clear();
+    this.own = null;
   }
 
   // ---- for the tests --------------------------------------------------------------------------------------------
@@ -1057,6 +1247,8 @@ export class Net implements GameNet {
     saveBytes: [number, number];
     sent: { view: number; save: number; views: number; ms: number };
     tickMs: number;
+    /** A guest's own cells moved on its page: ticks ahead of the host's last view, and how far that view moved one. */
+    predicted: { ahead: number; correction: number } | null;
   } {
     const game = this.game;
     const world = game.world;
@@ -1081,6 +1273,7 @@ export class Net implements GameNet {
       saveBytes: this.saveSize,
       sent: { view: this.sent.view, save: this.sent.save, views: this.sent.views, ms: this.sent.since ? performance.now() - this.sent.since : 0 },
       tickMs: game.stats.tickMs,
+      predicted: this.predict.active ? { ahead: this.predict.ahead, correction: this.predict.correction } : null,
     };
   }
 }

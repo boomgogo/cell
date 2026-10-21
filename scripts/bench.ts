@@ -3,6 +3,7 @@
 //     menu is interactive and the world is simulating;
 //  2. render: ?bench=1 scene (autopiloted mass-20000 player, full active zone) under CPU throttling → p50/p95.
 // Usage: npm run build && npm run bench -- [--cpu 4] [--seconds 20] [--scene all|plains|maze|rainbow] [--only load|render]
+//   [--zones N] (a room's host with N players far apart)
 //   [--headed]
 // Scenes: `plains` = mass-20000 autopilot at the widest zoom; `maze` = small autopiloted grazer on
 // a district's start tile (walls, maze food, ghosts, camera alignment); `rainbow` = small rainbow hunter exploding big
@@ -17,6 +18,8 @@ function arg(name: string, fallback: string): string {
 }
 const cpu = Number(arg('cpu', '4'));
 const seconds = Number(arg('seconds', '20'));
+/** --zones N: the zone simulated in full around N districts, as a room's host runs it for N players far apart. */
+const zones = Number(arg('zones', '1'));
 const headed = process.argv.includes('--headed');
 
 const server = await preview({ preview: { port: 4173, strictPort: false } });
@@ -81,7 +84,7 @@ try {
     page.on('console', (m) => {
       if (m.type() === 'error') console.log('page error:', m.text());
     });
-    await page.goto(`${url}?bench=1&seed=1&seconds=${seconds}&scene=${scene}&district=0`);
+    await page.goto(`${url}?bench=1&seed=1&seconds=${seconds}&scene=${scene}&district=0${zones > 1 ? `&zones=${zones}` : ''}`);
     await throttle(page, false);
     const result = await page.waitForFunction(() => (window as unknown as { __bench?: unknown }).__bench, undefined, {
       timeout: (seconds + 60) * 1000,
@@ -89,7 +92,7 @@ try {
     });
     const r = (await result.jsonValue()) as Record<string, number>;
     console.log(
-      `render ${scene} ${vp.name}, ${cpu}× CPU: frame p50 ${r.frameP50.toFixed(1)} ms, p95 ${r.frameP95.toFixed(1)} ms, ` +
+      `render ${scene}${zones > 1 ? ` (${zones} zones)` : ''} ${vp.name}, ${cpu}× CPU: frame p50 ${r.frameP50.toFixed(1)} ms, p95 ${r.frameP95.toFixed(1)} ms, ` +
         `tick p95 ${r.tickP95.toFixed(2)} ms, quality level ${r.qualityLevel}, zoom ${r.zoom.toFixed(3)}, frames ${r.frames}\n` +
         `    avg JS per frame: background ${r.bgMs.toFixed(1)} ms (layer redraws ${r.layerRedraws}), food ${r.foodMs.toFixed(1)} ms, cells ${r.cellsMs.toFixed(1)} ms, draw ${r.drawMs.toFixed(1)} ms (${r.counts})`,
     );

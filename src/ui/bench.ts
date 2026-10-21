@@ -2,6 +2,8 @@
 // Results land in window.__bench for scripts/bench.ts (Playwright + CPU throttling).
 // scene=rainbow: a small autopiloted hunter that stays rainbow, with a big NPC pulled next to it every 2 s,
 // so explosions, pieces and effects run all the time.
+// zones=N: the zone simulated in full around N places, the player's district and the start tiles of N − 1 other
+// districts, as a room's host runs it for N players far apart (net/Net.ts): what hosting costs, without the guests.
 import type { Game } from '../game.ts';
 import { copy, moveAlong, vec3 } from '../sphere/vec3.ts';
 
@@ -33,6 +35,15 @@ export function runBench(game: Game, params: URLSearchParams): void {
   const mass = Number(params.get('mass') ?? (scene === 'maze' || scene === 'rainbow' ? 40 : 20000));
   const warmup = 3000;
   game.autopilot(mass, scene);
+  const zones = Math.max(1, Math.min(12, Number(params.get('zones') ?? 1)));
+  const maze = game.world.maze;
+  const here = maze.enabled ? maze.layout.regionAt(game.camera.frame.c) : 0;
+  for (let k = 1, i = 0; k < zones && maze.enabled; i++) {
+    if (i === here) continue;
+    const d = maze.district(i);
+    game.world.observers.push(d.point(d.maze.start[0], d.maze.start[1], vec3()));
+    k++;
+  }
   let feedAt = 0;
   const feed = (now: number) => {
     if (scene !== 'rainbow' || now < feedAt) return;

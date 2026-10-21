@@ -20,7 +20,9 @@
     "cut": "node scripts/cut.ts",
     "bench": "node scripts/bench.ts",
     "e2e": "playwright test",
-    "flags": "node scripts/flags-atlas.ts"
+    "e2e:engines": "E2E_ENGINES=1 playwright test --project engines",
+    "flags": "node scripts/flags-atlas.ts",
+    "p3p2": "node scripts/p3p2.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
@@ -30,5 +32,8 @@
     "vite": "^8.3.0",
     "vitest": "^5.0.0",
     "wrangler": "^4.137.0"
+  },
+  "dependencies": {
+    "@p3p2/client": "^0.1.1"
   }
 }

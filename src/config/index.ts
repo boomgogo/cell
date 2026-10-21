@@ -7,7 +7,8 @@ export type { GameConfig } from './types.ts';
 
 const PRESETS: Record<string, GameConfig> = { base: baseConfig, tuned: tunedConfig, arcade: arcadeConfig };
 
-const NUMERIC_OVERRIDES = [
+/** The numbers a URL parameter can set (`?sphereRadius=8000`). */
+export const NUMERIC_OVERRIDES = [
   'sphereRadius',
   'foodPerRefArea',
   'npcPerRefArea',

@@ -24,6 +24,25 @@ import type { Minimap } from './ui/minimap.ts';
 
 export type GameState = 'menu' | 'playing' | 'dead';
 
+/**
+ * What the game asks of a room (`net/`), when the page is in one. Unset, the game is the page's own, as it always
+ * was.
+ */
+export interface GameNet {
+  /** True on a guest's page: the world is the host's, and this page draws what the host sends it. */
+  readonly drawing: boolean;
+  /** On a guest's page, once a frame: takes in what the host sent; returns how far between two reports to draw. */
+  frame(now: number): number;
+  /** On the host's page, after each step of the world. */
+  stepped(now: number): void;
+  /** PLAY. True when the room takes care of it: on a guest's page, the host puts the player in its world. */
+  play(name: string, hue: number): boolean;
+  /** On the host's page: why this page's own PLAY must wait (the world has as many colonies as it takes), or null. */
+  full(): string | null;
+  /** On a guest's page: the live spores of district `d`, as the host last said, a bit for each spot. */
+  sporeMask(d: number): number;
+}
+
 export interface FrameStats {
   fps: number;
   frameMs: number;
@@ -54,14 +73,20 @@ export class Game {
   readonly cfg: GameConfig;
   /** World seed (also fixes the NPCs' countries). */
   readonly seed: number;
-  readonly world: World;
+  /** Replaced in a room: by the host's world drawn on a guest's page, or by a world carried on from the last host. */
+  world: World;
   readonly camera: Camera;
   readonly renderer: CanvasRenderer;
   readonly opts: RenderOptions;
   readonly quality: QualityController;
   readonly input: Input;
   readonly hud: Hud;
-  readonly human: Organism;
+  human: Organism;
+  /** The room, while the page is in one. See `GameNet`. */
+  net: GameNet | null = null;
+  /** While the page holds an invite it has not answered (ui/friends.ts): what PLAY and Enter do instead. */
+  invite: ((name: string) => void) | null = null;
+  readonly difficulty: (typeof DIFFICULTY)[keyof typeof DIFFICULTY];
   state: GameState = 'menu';
   readonly stats: FrameStats = { fps: 0, frameMs: 0, tickMs: 0, p95: 0 };
   /** Hook for the debug panel / bench. */
@@ -153,6 +178,7 @@ export class Game {
     this.camera.jumpTo(start, 64);
     this.world.observer = this.camera.frame.c;
     const difficulty = DIFFICULTY[(params.get('difficulty') as keyof typeof DIFFICULTY) ?? 'normal'] ?? DIFFICULTY.normal;
+    this.difficulty = difficulty;
     populateNpcs(this.world, { difficulty });
     populateResidents(this.world);
     this.scheduleDistricts();
@@ -163,7 +189,9 @@ export class Game {
     window.addEventListener('resize', () => (this.pendingResize = true));
     this.hud.form.addEventListener('submit', (e) => {
       e.preventDefault();
-      this.play(this.hud.nick.value.trim().slice(0, 15));
+      const name = this.hud.nick.value.trim().slice(0, 15);
+      if (this.invite) this.invite(name);
+      else this.play(name);
     });
     const press = (el: HTMLElement, fn: () => void) =>
       el.addEventListener('pointerdown', (e) => {
@@ -219,6 +247,78 @@ export class Game {
           /* no flag for the player */
         });
     });
+  }
+
+  /**
+   * A world from a seed, peopled as the page's first one is: the room needs one when a guest becomes the host, and
+   * when a guest leaves the room and plays alone again.
+   */
+  newWorld(seed: number): World {
+    const world = new World(this.cfg, { seed });
+    world.observer = this.camera.frame.c;
+    populateNpcs(world, { difficulty: this.difficulty });
+    populateResidents(world);
+    return world;
+  }
+
+  /** Puts another world in place of this one, with `human` as this player in it. */
+  replaceWorld(world: World, human: Organism): void {
+    this.world = world;
+    this.human = human;
+    world.observer = this.camera.frame.c;
+    this.spectate = null;
+    this.acc = 0;
+    this.scheduleDistricts();
+  }
+
+  /**
+   * In a room, on a guest's page: the host has put this player's cells at `at`. Home, the trail and the camera start
+   * there, as they start where `play` spawns alone.
+   */
+  placed(at: Vec3): void {
+    this.camera.jumpTo(at, this.human.sumRadius);
+    this.homeTracker.reset(at);
+    this.trail.clear();
+    this.renderer.home = this.arcade ? vec3(at.x, at.y, at.z) : null;
+    this.renderer.homeHue = this.human.hue;
+  }
+
+  /** In a room, on a guest's page, on the menu: look at `at` (where the host looks), so PLAY starts there. */
+  lookAt(at: Vec3): void {
+    this.camera.jumpTo(at, 64);
+    this.spectate = null;
+  }
+
+  /** PLAY was refused (the room's world is full): back to the menu, saying why. A colony already in play stays. */
+  refused(message: string): void {
+    if (this.state === 'playing' && this.human.alive && this.human.cells.length > 0) return;
+    this.state = 'menu';
+    this.hud.showMenu(message);
+    this.hud.setBanner('', '');
+  }
+
+  /** The events of the world's last step, for the renderer and the HUD: on a guest's page, of the host's last report. */
+  takeEvents(now: number): void {
+    this.renderer.onEvents(this.world, this.world.events, now);
+    this.handleEvents(now);
+  }
+
+  /** Where a player who presses PLAY starts: on the nearest district's start tile if nothing big is close, else somewhere safe near `near`. */
+  spawnPoint(near: Vec3): Vec3 {
+    const world = this.world;
+    if (this.arcade && world.maze.enabled) {
+      const i = world.maze.layout.regionAt(near);
+      const d = world.maze.district(i);
+      const p = d.point(d.maze.start[0], d.maze.start[1], vec3());
+      let threat = false;
+      world.queryCells(p, 900, (c) => {
+        if (c.owner && c.r > this.cfg.startRadius && world.distance(c.p, p) - c.r < 500) threat = true;
+        // In a room: another player on the tile, as small as this one, would start on top of it.
+        if (c.owner?.isHuman && world.distance(c.p, p) - c.r < 200) threat = true;
+      });
+      if (!threat) return p;
+    }
+    return world.findSafeSpotNear(vec3(), near, 4000, this.cfg.startRadius);
   }
 
   /** Generate the remaining maze districts in idle time, nearest first. */
@@ -279,23 +379,21 @@ export class Game {
   play(name: string): void {
     const human = this.human;
     const world = this.world;
+    const full = this.net?.full() ?? null;
+    if (full) {
+      this.refused(full);
+      return;
+    }
     human.name = name;
     human.hue = Math.floor(Math.random() * 360);
-    let at: Vec3 | null = null;
-    if (this.arcade && world.maze.enabled) {
-      // Spawn on the start tile of the nearest district, below its ghost pen, if nothing big is close.
-      const i = world.maze.layout.regionAt(this.camera.frame.c);
-      const d = world.maze.district(i);
-      const p = d.point(d.maze.start[0], d.maze.start[1], vec3());
-      let threat = false;
-      world.queryCells(p, 900, (c) => {
-        if (c.owner && c.r > this.cfg.startRadius && world.distance(c.p, p) - c.r < 500) threat = true;
-      });
-      if (!threat) at = p;
+    // In a room as a guest the host puts the player in its world, near a friend (net/Net.ts).
+    const remote = this.net?.play(name, human.hue) ?? false;
+    // Spawn on the start tile of the nearest district, below its ghost pen, if nothing big is close.
+    const at = remote ? vec3(this.camera.frame.c.x, this.camera.frame.c.y, this.camera.frame.c.z) : this.spawnPoint(this.camera.frame.c);
+    if (!remote) {
+      world.spawnOrganism(human, at);
+      this.camera.jumpTo(at, human.sumRadius);
     }
-    if (!at) at = world.findSafeSpotNear(vec3(), this.camera.frame.c, 4000, this.cfg.startRadius);
-    world.spawnOrganism(human, at);
-    this.camera.jumpTo(at, human.sumRadius);
     this.state = 'playing';
     this.hud.hideMenu(this.input.touch || matchMedia('(pointer: coarse)').matches);
     this.points = 0;
@@ -365,21 +463,27 @@ export class Game {
     const wheel = this.input.takeWheel();
     if (wheel) this.camera.addWheel(wheel);
 
-    this.acc += dt;
     let steps = 0;
     const t0 = performance.now();
-    while (this.acc >= tickMs && steps < 4) {
-      world.step();
-      this.renderer.onEvents(world, world.events, now);
-      this.handleEvents(now);
-      this.acc -= tickMs;
-      steps++;
+    let alpha: number;
+    if (this.net?.drawing) {
+      // A guest's page: the host's world, as the host last said, drawn between its last two reports.
+      alpha = this.net.frame(now);
+    } else {
+      this.acc += dt;
+      while (this.acc >= tickMs && steps < 4) {
+        world.step();
+        this.takeEvents(now);
+        this.net?.stepped(now);
+        this.acc -= tickMs;
+        steps++;
+      }
+      if (steps === 4 && this.acc > tickMs) this.acc = tickMs * 0.5;
+      alpha = this.acc / tickMs;
     }
-    if (steps === 4 && this.acc > tickMs) this.acc = tickMs * 0.5;
     const t1 = performance.now();
     if (steps > 0) this.stats.tickMs = (t1 - t0) / steps;
 
-    const alpha = this.acc / tickMs;
     const target = this.focus();
     if (target) {
       this.interpolatedCenter(target, alpha, this.camTarget);
@@ -453,7 +557,8 @@ export class Game {
       const inside = maze.inInterior(center);
       let sub = '';
       if (inside && world.arcade) {
-        const n = world.arcade.powerAlive(i);
+        const spots = maze.isBuilt(i) ? maze.district(i).maze.power.length / 2 : 12;
+        const n = this.net?.drawing ? popcount(this.net.sporeMask(i) & ((1 << spots) - 1)) : world.arcade.powerAlive(i);
         if (n > 0) sub = `spores ×${n}`;
       }
       hud.setBanner(`${region.fruit} ${i + 1} · ${region.name.toUpperCase()}`, sub);
@@ -476,6 +581,8 @@ export class Game {
   private collectPower(): number {
     const arcade = this.world.arcade;
     if (!arcade) return 0;
+    const net = this.net;
+    if (net?.drawing) return this.collectRoomPower(net);
     const food = this.world.food;
     let n = 0;
     for (const st of arcade.states) {
@@ -491,6 +598,33 @@ export class Game {
         this.power[n * 3] = food.x[fi];
         this.power[n * 3 + 1] = food.y[fi];
         this.power[n * 3 + 2] = food.z[fi];
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /** On a guest's page: the spores the host says are live, on the spots of the districts this page has built. */
+  private collectRoomPower(net: GameNet): number {
+    const maze = this.world.maze;
+    const at = this.tmp;
+    let n = 0;
+    for (let d = 0; d < 12; d++) {
+      if (!maze.isBuilt(d)) continue;
+      const district = maze.district(d);
+      const spots = district.maze.power;
+      const mask = net.sporeMask(d);
+      for (let k = 0; k < spots.length / 2 && k < 16; k++) {
+        if (!(mask & (1 << k))) continue;
+        if (this.power.length < (n + 1) * 3) {
+          const grown = new Float64Array(Math.max(48, this.power.length * 2));
+          grown.set(this.power);
+          this.power = grown;
+        }
+        district.point(spots[k * 2], spots[k * 2 + 1], at);
+        this.power[n * 3] = at.x;
+        this.power[n * 3 + 1] = at.y;
+        this.power[n * 3 + 2] = at.z;
         n++;
       }
     }
@@ -615,6 +749,11 @@ export class Game {
   private focus(): Organism | null {
     if (this.state === 'playing' && this.human.alive) return this.human;
     const world = this.world;
+    // In a room, the menu watches a friend who plays.
+    if (this.net) {
+      const friend = this.friendInSight();
+      if (friend) return (this.spectate = friend);
+    }
     const s = this.spectate;
     const stale = !s || !s.alive || s.dormant || s.cells.length === 0 || world.tick - this.spectatePickTick > 25 * 20;
     if (stale) {
@@ -632,6 +771,23 @@ export class Game {
     return this.spectate && this.spectate.cells.length ? this.spectate : null;
   }
 
+  /** In a room: the friend the menu watches, the one it watched if still playing, else the nearest. */
+  friendInSight(): Organism | null {
+    const s = this.spectate;
+    if (s && s.isHuman && s !== this.human && s.alive && s.cells.length > 0) return s;
+    let best: Organism | null = null;
+    let bestDist = Infinity;
+    for (const o of this.world.organisms) {
+      if (!o.isHuman || o === this.human || !o.alive || o.cells.length === 0) continue;
+      const d = this.world.distance(o.cells[0].p, this.camera.frame.c);
+      if (d < bestDist) {
+        bestDist = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
   private interpolatedCenter(org: Organism, alpha: number, out: Vec3): Vec3 {
     let x = 0;
     let y = 0;
@@ -647,4 +803,10 @@ export class Game {
     out.z = z / l;
     return out;
   }
+}
+
+function popcount(n: number): number {
+  let c = 0;
+  for (let v = n >>> 0; v; v &= v - 1) c++;
+  return c;
 }

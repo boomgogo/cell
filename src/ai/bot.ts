@@ -50,7 +50,8 @@ export class BotController implements Controller {
   private readonly danger = new Float64Array(SLOTS);
   private readonly frame = new Frame();
   private readonly local: Vec2 = { x: 0, y: 0 };
-  private readonly phase: number;
+  /** Which tick of `thinkTicks` it thinks on: its place among the NPCs. A new host in a room makes it again with it. */
+  readonly phase: number;
   private splitCooldown = 0;
   private pursuit: Cell | null = null;
   private pursuitTicks = 0;

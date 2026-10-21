@@ -74,6 +74,11 @@ export class World {
 
   /** Centre of the active zone (the camera). null = simulate everything. */
   observer: Vec3 | null = null;
+  /**
+   * More centres, one for each other player in a room (`net/`): the zone is simulated in full around every one of
+   * them. Empty alone.
+   */
+  readonly observers: Vec3[] = [];
 
   /** Maze districts; `maze.enabled` is false in the base and tuned presets. */
   readonly maze: MazeWorld;
@@ -278,6 +283,48 @@ export class World {
     this.rebuildIndex();
   }
 
+  // ---------------------------------------------------------------- a room (net/)
+
+  /**
+   * Takes every cell out of the world, viruses and loose mass included. For a room: a guest's page draws the host's
+   * cells in place of its own, and a new host puts back the cells of the last host's save.
+   */
+  clearCells(): void {
+    for (const c of this.cells) c.removed = true;
+    this.cells.length = 0;
+    this.cellsById.clear();
+    for (const org of this.organisms) org.cells.length = 0;
+    this.virusCount = 0;
+    this.rebuildIndex();
+  }
+
+  /** Puts a cell into the world as it is, its owner's list included: a cell of a save, or one the host reported. */
+  putCell(cell: Cell): void {
+    cell.removed = false;
+    this.addCell(cell);
+    if (cell.owner && !cell.owner.cells.includes(cell)) cell.owner.cells.push(cell);
+  }
+
+  /** Takes one cell out, as eating does. */
+  dropCell(cell: Cell): void {
+    this.removeCell(cell);
+  }
+
+  /** Compacts the cell list and indexes it again, after cells were put in and taken out from outside a step. */
+  reindex(): void {
+    this.compactCells();
+    this.rebuildIndex();
+  }
+
+  /** The id the next new thing gets: a new host goes on from the last host's. */
+  get idFloor(): number {
+    return this.nextId;
+  }
+
+  set idFloor(n: number) {
+    this.nextId = Math.max(this.nextId, n);
+  }
+
   // ---------------------------------------------------------------- spawning
 
   addOrganism(org: Organism): void {
@@ -301,7 +348,7 @@ export class World {
     org.rainbowUntil = 0;
     org.explodeCount = 0;
     org.cells.length = 0;
-    if (!org.isHuman && this.observer && dot(p, this.observer) < Math.cos(this.cfg.activeZoneRadius / this.R)) {
+    if (!org.isHuman && this.observer && this.nearest(p) < Math.cos(this.cfg.activeZoneRadius / this.R)) {
       org.dormant = true;
       org.dormantMass = radiusToMass(r);
       copy(org.dormantP, org.home ?? p);
@@ -988,8 +1035,7 @@ export class World {
   // ---------------------------------------------------------------- population
 
   private updatePopulation(): void {
-    const obs = this.observer;
-    if (!obs) return;
+    if (!this.observer) return;
     const cfg = this.cfg;
     const R = this.R;
     const cosWake = Math.cos(cfg.activeZoneRadius / R);
@@ -999,12 +1045,19 @@ export class World {
       if (!org.alive || org.isHuman) continue;
       if (org.dormant) {
         if (!org.resident) this.dormantStep(org);
-        if (dot(org.dormantP, obs) > cosWake) this.wake(org);
-      } else if (dot(org.center(center), obs) < cosSleep) {
+        if (this.nearest(org.dormantP) > cosWake) this.wake(org);
+      } else if (this.nearest(org.center(center)) < cosSleep) {
         this.sleep(org);
       }
     }
     this.dormantFights();
+  }
+
+  /** The cosine of the angle to the nearest centre of the active zone: the camera's, or another player's. */
+  private nearest(p: Vec3): number {
+    let best = this.observer ? dot(p, this.observer) : -1;
+    for (const o of this.observers) best = Math.max(best, dot(p, o));
+    return best;
   }
 
   /** One second of statistical life: graze at an expected rate, decay, wander. */

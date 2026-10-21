@@ -5,7 +5,7 @@ that way, what was measured, and what is still open. New prompts, plans and summ
 
 ## 1. What Cell is
 
-A single-player browser game. You are a bacterium on the surface of a sphere, among about 800 NPC colonies.
+A browser game, alone or with a friend. You are a bacterium on the surface of a sphere, among about 800 NPC colonies.
 
 - **Basic moves.** Eat pellets and smaller cells to grow; bigger cells eat you. Split (Space) to lunge at prey, eject
   mass (W) to feed or bait. Viruses burst cells that are too big.
@@ -14,7 +14,9 @@ A single-player browser game. You are a bacterium on the surface of a sphere, am
   food, rainbow spores and resident phages, and landmarks so you know where you are.
 - **Look.** Everything is drawn like a risograph print.
 
-It is a static site (Vite + TypeScript, no runtime dependencies) and needs no server.
+It is a static site (Vite + TypeScript) and needs no server of its own. Its one runtime dependency is p3p2's client
+(`@p3p2/client`): playing with a friend takes a p3p2 server, and the room's code loads only when a room is opened
+(§3, plan 2).
 
 ## 2. Spec and budgets
 
@@ -33,6 +35,7 @@ How the code keeps to that:
 | Load to an interactive menu on Slow 4G (150 ms RTT, 1.6 Mbps), cold cache | `npm run bench` | See §8 |
 | Frames at 60 fps on an integrated GPU; ≤ 33 ms p95 at 4× CPU throttling as a low-end proxy | `npm run bench -- --cpu 4` | See §8 |
 | Sim tick well under the 40 ms tick at full scale | `npm run arena` | See §8 |
+| A room's host: frame p95 ≤ 33 ms at 4× CPU with as many players as a room allows, in different districts | `npm run bench -- --scene maze --cpu 4 --zones 2` | `ai/next_2.md` |
 
 What keeps the initial load small:
 
@@ -51,6 +54,7 @@ What keeps the initial load small:
 | `src/render` | Sphere camera, Canvas 2D renderer, cached static layer, membranes, effects, palette, adaptive quality |
 | `src/input`, `src/ui`, `src/game.ts` | Pointer/touch/keyboard input, HUD and menu, minimap, home cues, sound, the game loop |
 | `src/config` | Every tunable in one `GameConfig`, in three presets (§4) |
+| `src/net` | Friends in one world through p3p2: the host's side and the guest's side (`Net.ts`), bytes on the wire, the room's rules |
 
 The key decisions, and why:
 
@@ -83,6 +87,19 @@ The key decisions, and why:
   - Walls, region borders, the floor grid and junction emblems are drawn into a cached static layer. It is redrawn
     only when the camera has moved or zoomed enough.
 - **Lazy maze generation.** Districts are generated in idle time, nearest first (about 10 ms each).
+- **Friends: one world, on the host's page** (plan 2, from the p3p2 fork's design). Pages can't each run the world:
+  engines differ in the last bit of `Math.sin`, and each page builds its districts, and so grows its food, in its own
+  idle time.
+  - The host's page simulates in full around every player (`World.observers`). A guest's page draws what the host
+    sends it (12.5 views a second, one `room.sendEach` for all guests) and sends its steering (20 a second).
+  - Every 5 s the host sends a packed save (about 35 KB), and the next player carries the world on from it.
+  - At most eight play at once (`MAX_PLAYERS`): the host's cost grows with how far apart the players are, to a frame
+    p95 of about 41 ms at 4× throttling for eight in eight districts. Anyone else watches. A newcomer looks where the
+    host looks and starts near a friend.
+  - The menu hosts and answers invites itself (`ui/friends.ts`), so the menu's name is the room's; p3p2's panel shows
+    only in a room, with the invite link, who is here and chat.
+  - The first page in a room sets the rules (`?preset=`, `mapSeed`, …); a page with other rules reloads into them.
+    `game.version` is the build's commit, so different builds don't share a room.
 
 ## 4. Rules
 
@@ -197,6 +214,9 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
   is the **Mass** (the points are the score there); the death card shows the run's points and peak mass.
   - The leaderboard shows the top 10 plus your own row, each with its mass.
   - The arcade HUD shows points, high score, a rainbow bar, a district banner, toasts, a globe minimap and a home arrow.
+- **The menu** has Play, Play with friends (p3p2's panel, with a line to p3p2.me for whoever sets up the room), and
+  links to the repository and to more games on Muon.Day. It scrolls on a phone on its side. The bottom-right corner
+  shows the version, `v.` and the first 4 characters of the build's commit.
 - **Sound** is WebAudio oscillators and one noise buffer, loaded on the first Play: chomp, rainbow loop, explosion, and
   swell.
 
@@ -208,7 +228,9 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
   - Path flood and residents, maze food and spores, rainbow explosions, packing, home cues, leaderboard rows.
   - Ink contrast and resident inks, an NPC arena smoke test, and "big NPCs keep exploring".
 - **`npm run e2e`:** Playwright on the production build with the system Chrome, on desktop and phone viewports, for the
-  `arcade` and `base` presets. It covers:
+  `arcade` and `base` presets. With a p3p2 checkout (`~/Repos/p3p2`, or `P3P2_DIR`) it also plays friends through a
+  local server: one world, the host leaving, a reload, a bad connection, a phone, a full world, the rules.
+  `npm run e2e:engines` puts Chrome, Firefox and WebKit in one room. The single-player tests cover:
   - menu → play → eaten → play again
   - the arcade HUD
   - the floor inside and outside a maze
@@ -220,6 +242,8 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
 - **`npm run bench`:** load time on Slow 4G, and render frame times on the local GPU for the `plains`, `maze` and
   `rainbow` scenes. `--cpu 4` gives a low-end proxy.
 - **`npm run size`:** the initial-load gzip budget.
+- **`npm run p3p2`:** a local p3p2 server from a checkout, for trying friends on one machine. `npm run bench --
+  --zones N` and `npm run arena -- --observers N` measure a host with N players far apart.
 - **`npm run autoplay`:** the autoplayer in Node (`scripts/autoplay/`): a player brain that sees only a snapshot of the
   screen, hands that move like a person's, and a harness that mirrors Game's frame loop. `batch` gives statistics over
   seeds (`--driver npc` for the NPC-brain baseline); `tune` searches the brain's parameters for mass at 5:00.
@@ -289,3 +313,6 @@ RTX 3060, earlier iterations an Intel RPL-P integrated GPU with similar frame nu
   dropping a target that bounced.
 - **UI ideas not done.** Retitle the leaderboard, move the score into the arcade HUD, rework the menu layout.
 - **Deploy.** Static hosting with brotli and immutable asset caching has not been set up.
+- **Friends.** Eight can play at once. Spread over eight districts they take a low-end host to about 41 ms a frame
+  (30 alone): a cheaper world around each extra player would bring that back under 33 ms. A guest's own cells move a
+  round trip after the mouse, with no prediction. Nobody has judged the feel by playing, or tried WebKit (it needs system libraries here).

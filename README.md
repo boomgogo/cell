@@ -1,7 +1,7 @@
 # Cell
 **Play at <https://c0.muon.day/>**
 
-Bacteria eating bacteria on a sphere: a single-player browser game against NPC colonies. Eat pellets and smaller cells,
+Bacteria eating bacteria on a sphere: a browser game against NPC colonies, alone or with a friend. Eat pellets and smaller cells,
 split to catch prey, eject mass, and avoid bigger cells and viruses. The world is a sphere, so there are no edges and you
 can walk all the way round it.
 
@@ -25,7 +25,11 @@ corridor can always get out. The same rule applies to you and to NPCs.
 
 Every colony carries a country flag next to its name and in the leaderboard, so the world feels like players from
 around the globe. NPC countries are picked by world population. Your own comes from your connection's country (see
-[Country flags](#country-flags)). The menu links to this repository.
+[Country flags](#country-flags)). The menu links to this repository and to more games on [Muon.Day](https://muon.day).
+The bottom-right corner shows the build's version: `v.` and the first 4 characters of the commit it was built from
+(`v.dev` on the dev server).
+
+Up to eight players can share one world through a [p3p2](https://p3p2.me) server: see [Playing with friends](#playing-with-friends).
 
 `ai/summary.md` describes how the game is built, the design decisions behind it, and what is still open.
 
@@ -46,14 +50,16 @@ npm run dev
 | `npm run preview:cf` | Build, then serve `dist/` through the local Cloudflare runtime (`wrangler dev`) |
 | `npm run deploy` | Build, then deploy to Cloudflare Workers (`wrangler deploy`) |
 | `npm test` | Unit tests (Vitest): sphere math, rules, mechanics, virus pop pieces, lap test, NPC arena smoke test, big NPCs keep exploring, leaderboard rows, ink palette contrast and resident inks, jelly membrane, maze generator/walls, maze food and rainbow spores, rainbow explosions, packing (escape field, overgrown cells get out), path flood + resident phages, home/lap cues, adaptive quality (no flip-flopping at 60/120/144 Hz), NPC countries by population, the country lookup chain, arcade points (own cells merging back score nothing), the autoplayer (it sees only the screen, flees, chases, splits only when safe, moves like a hand, plays the same game twice) |
-| `npm run e2e` | Playwright e2e (menu → play → eaten → respawn, arcade HUD, paper floor in and out of mazes, a rainbow explosion, the press stock, country flags with a stubbed Cloudflare trace, the GitHub link, no blank frame on a quality change) on desktop + phone viewports for the `arcade` and `base` presets, using system Chrome |
+| `npm run e2e` | Playwright e2e (menu → play → eaten → respawn, arcade HUD, paper floor in and out of mazes, a rainbow explosion, the press stock, country flags with a stubbed Cloudflare trace, the GitHub and Muon.Day links, the menu on small screens, the version label, no blank frame on a quality change) on desktop + phone viewports for the `arcade` and `base` presets, using system Chrome. With a p3p2 checkout, also friends in one world through a local server: one world, starting near a friend, eating and being eaten, the host leaving, a reload, a bad connection, a phone, a full world, the room's rules |
+| `npm run e2e:engines` | Chrome, Firefox and WebKit in one room, with the same mazes tile for tile (Playwright's own Firefox and WebKit: `npx playwright install firefox webkit`; WebKit on Linux also needs `sudo npx playwright install-deps webkit`) |
+| `npm run p3p2` | A local p3p2 server for trying friends on one machine (see [Playing with friends](#playing-with-friends)) |
 | `npm run flags` | Rebuild the flag atlas (`src/assets/flags.webp` + `flagIndex.ts`) from `flag-icons` with system Chrome; the output is committed |
 | `npm run size` | Initial-load gzip budget check (run after `build`) |
-| `npm run bench` | Load time (Slow 4G) + render frame times on the local GPU for the `plains`, `maze` and `rainbow` scenes, `--cpu 4` for a low-end proxy, `--scene maze` for one scene (run after `build`) |
+| `npm run bench` | Load time (Slow 4G) + render frame times on the local GPU for the `plains`, `maze` and `rainbow` scenes, `--cpu 4` for a low-end proxy, `--scene maze` for one scene, `--zones 2` for a room's host with players in two districts (run after `build`) |
 | `npm run autoplay` | The autoplayer in Node, faster than real time (see [Autoplay and recordings](#autoplay-and-recordings)): `-- run --seed 3`, `-- batch --seeds 1-200` (statistics; `--driver npc` for the NPC-brain baseline), `-- tune --seeds 1-200 --holdout 1001-1200` (tune the brain for its mass at 5:00) |
 | `npm run record` | Plays the built game in Chrome with the autoplayer and records it frame by frame: `-- dry`, `-- search`, `-- pilot`, `-- youtube`, `-- watch` (run after `build`) |
 | `npm run cut` | The finished videos and their text from the recordings: `-- youtube`, `-- short --seed N`, `-- x` |
-| `npm run arena` | Headless NPC arena, per-personality stats and exploration (30 s windows per radius bucket: share of windows where a cell ended less than 3 r from its start, and turn-rounds per think): `-- --minutes 10 --R 4000 --seed 1`; `-- --preset arcade` adds mazes, resident phages, rainbow spore, explosion and packing metrics (R 16000); `-- --cfg botTurnCost=0.2` overrides numeric config for tuning |
+| `npm run arena` | Headless NPC arena, per-personality stats and exploration (30 s windows per radius bucket: share of windows where a cell ended less than 3 r from its start, and turn-rounds per think): `-- --minutes 10 --R 4000 --seed 1`; `-- --preset arcade` adds mazes, resident phages, rainbow spore, explosion and packing metrics (R 16000); `-- --cfg botTurnCost=0.2` overrides numeric config for tuning; `-- --observers 8` simulates in full around 8 districts, as a room's host would |
 
 ## Autoplay and recordings
 
@@ -118,6 +124,54 @@ Your country is looked up once in idle time and cached for a week, trying in ord
 
 `?geo=0` skips the lookup and `?flags=0` turns flags off.
 
+## Playing with friends
+
+Through [p3p2](https://p3p2.me) (`@p3p2/client`): rooms, invite links and chat through a small server of your own. Alone,
+the game is what it was: the page loads p3p2's 2 KB entry and asks no server anything. The room's code loads when a room
+is opened.
+
+- **Hosting.** You need a room URL from a p3p2 server. [p3p2.me](https://p3p2.me) explains both ways to get one: its
+  hub makes a free temporary server (one room, up to 5 people, for an hour), or you can run your own. The room's game
+  URL is the address you play at (`https://c0.muon.day/`). Type your name, press **Play with friends**, paste the
+  room URL, press **Create the invite link** and send the link.
+- **Joining.** Whoever opens the invite is asked on the menu, *Join ‹room›?*, and joins with the name they typed
+  there (or plays alone). They start by looking where the host looks, and PLAY puts their colony near a friend.
+- **One name.** The name on the menu is the one the room knows, in p3p2's panel and chat too. p3p2 has no renaming,
+  so in a room the name can't be changed until the room is over. The panel (invite link, QR code, who is here, chat)
+  shows only in a room: press **Friends**.
+- **One world, on the host's page.** The host's page runs the world, in full around every player. Each guest's page
+  draws what the host sends it, 12.5 times a second, and sends where it steers 20 times a second, so a guest's own
+  cells move a round trip after the mouse.
+- **Eight players at once, and anyone can watch.** The host's cost grows with how far apart the players are. On a
+  low-end device (4× CPU throttling), eight in eight districts take the host's frame from 30 ms to about 41 ms: the
+  world keeps real time, at a lower frame rate. Friends who stay together cost about what one player costs; see
+  `MAX_PLAYERS` in `src/net/Net.ts`. Anyone else in the room watches a friend who plays, and can play once a place is
+  free. A hub room takes 5 people; a server of your own takes 16 by default.
+- **When the host goes**, the next player carries the world on from the host's last save (every 5 s), with new
+  food. A reload comes back to the room, and PLAY gives your colony back.
+- **One set of rules.** The first page in a room sets its rules (`?preset=`, `mapSeed`, `sphereRadius` and the
+  like). A page opened with other rules reloads into the room's. Builds of different commits are kept in different
+  rooms.
+
+A p3p2 server sees the addresses of the players in a room, and only once a room is opened.
+
+### Trying it on one machine
+
+The server is one Node.js process (no Docker needed), started from a checkout of
+[doublependu/p3p2](https://github.com/doublependu/p3p2):
+
+```sh
+git clone https://github.com/doublependu/p3p2 ~/Repos/p3p2 && (cd ~/Repos/p3p2 && npm ci --workspace server)
+npm run p3p2                 # a server on port 8080, its database in memory; prints the portal and its password
+npm run dev -- --host        # the game on this machine's LAN address
+```
+
+In the portal, create a room for `http://<LAN address>:5173/`. Paste its room URL into **Play with friends**, and
+open the invite in another browser or profile (two tabs of one profile are one player), or on a phone on the same
+Wi-Fi. `P3P2_DIR` points at another checkout. `npm run p3p2` also prints how to put p3p2's lag proxy in between.
+
+`npm run e2e` starts a server like this for each multiplayer test; without a checkout those tests are skipped.
+
 ## URL parameters
 
 | Param | Example | Effect |
@@ -139,8 +193,9 @@ Your country is looked up once in idle time and cached for a week, trying in ord
 | `quality` | `?quality=3` | Fix the render quality level 0–6 (disables adaptive quality) |
 | `geo` | `?geo=0` | Don't look up the player's country (no network requests for it) |
 | `flags` | `?flags=0` | No country flags |
-| `bench` | `?bench=1&seconds=30&mass=20000&scene=maze` | Autopiloted perf run (`plains`, `maze` or `rainbow` scene); results in `window.__bench` |
+| `bench` | `?bench=1&seconds=30&mass=20000&scene=maze&zones=2` | Autopiloted perf run (`plains`, `maze` or `rainbow` scene; `zones=N` simulates in full around N districts, as a room's host would); results in `window.__bench` |
 | `manual` | `?manual=1` | No rAF loop; drive frames with `__game.advance(ms)` (automation) |
+| `room` | `?room=…` | A p3p2 invite: the page asks *Join?* (p3p2 builds these links) |
 
 ## Layout
 
@@ -150,6 +205,7 @@ Your country is looked up once in idle time and cached for a week, trying in ord
 - `src/ai` — NPC controller (context steering with a turning cost, wander goals and a progress detector so big NPCs keep exploring; personalities, maze routing), resident phages (`ghost.ts`), population
 - `src/render` — sphere camera (district alignment), Canvas 2D renderer (background patterns, cached static layer with walls/borders/emblems, pellets, spore orbs, jelly membranes, rainbow cells, explosion effects, fading eaten cells, lazy country flags), adaptive quality
 - `src/geo` — NPC countries by population, the player's country lookup
+- `src/net` — friends in one world through p3p2: the host's world and what it tells each guest, a guest's page drawing it, the save a new host carries on from (`Net.ts`), bytes on the wire (`wire.ts`), the room's rules (`rules.ts`)
 - `src/assets` — the generated flag atlas and its index
 - `src/input`, `src/ui`, `src/game.ts` — input, HUD/menu, arcade HUD (minimap, banner, home arrow), home/lap tracker, lazy sound, game loop
 - `ai/summary.md` — how the game is built and why, measured budgets, and open items

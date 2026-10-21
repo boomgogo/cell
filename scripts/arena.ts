@@ -3,7 +3,9 @@
 // resident ghosts; an observer camera tours the districts (one minute each) so the active zone stays full, and maze,
 // power, explosion and packing metrics are added.
 // Usage: npm run arena -- [--seed 1] [--minutes 10] [--R 4000] [--npc 50] [--preset base|arcade] [--difficulty normal]
-//        [--cfg botTurnCost=0.35,botWanderEnter=0.02]
+//        [--cfg botTurnCost=0.35,botWanderEnter=0.02] [--observers 8]
+// `--observers N`: the zone simulated in full around N centres, each touring a district of its own, as a room's host
+// runs it for N players far apart (src/net/Net.ts): what the host's page pays in the worst case.
 import { loadConfig, perSphere } from '../src/config/index.ts';
 import { DIFFICULTY, type PersonalityId } from '../src/ai/personalities.ts';
 import { BotController, botStats } from '../src/ai/bot.ts';
@@ -12,7 +14,7 @@ import { personalityOf, populateNpcs, populateResidents } from '../src/ai/popula
 import { PELLET, POWER } from '../src/sim/food.ts';
 import type { Organism } from '../src/sim/organism.ts';
 import { World } from '../src/sim/world.ts';
-import { vec3 } from '../src/sphere/vec3.ts';
+import { randomUnit, vec3 } from '../src/sphere/vec3.ts';
 
 function arg(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -37,6 +39,8 @@ const difficulty = DIFFICULTY[arg('difficulty', 'normal') as keyof typeof DIFFIC
 const world = new World(cfg, { seed });
 const maze = world.maze;
 const observer = vec3(0, 0, 1);
+const observerCount = Math.max(1, Math.min(12, Number(arg('observers', '1'))));
+for (let k = 1; k < observerCount; k++) world.observers.push(randomUnit(vec3(), world.rng));
 if (maze.enabled) {
   // Pre-generate districts (the browser does this in idle time) and park the observer at the first one.
   while (maze.buildNext()) {}
@@ -154,7 +158,11 @@ function closeLife(o: Organism) {
 
 const perMinute = Math.round(60000 / cfg.tickMs);
 for (let t = 0; t < ticks; t++) {
-  if (maze.enabled && t % perMinute === 0) Object.assign(observer, maze.layout.regions[(t / perMinute) % 12].centre);
+  if (maze.enabled && t % perMinute === 0) {
+    const m = t / perMinute;
+    Object.assign(observer, maze.layout.regions[m % 12].centre);
+    world.observers.forEach((o, k) => Object.assign(o, maze.layout.regions[(m + k + 1) % 12].centre));
+  }
   const s0 = performance.now();
   world.step();
   const dt = performance.now() - s0;
@@ -271,7 +279,7 @@ const elapsed = performance.now() - t0;
 tickTimes.sort((a, b) => a - b);
 console.log(
   `arena preset=${preset} seed=${seed} R=${cfg.sphereRadius} npcs=${npcCount} residents=${residents.length} food=${world.foodTarget} viruses≥${world.virusMin} ` +
-    `${minutes} min sim in ${(elapsed / 1000).toFixed(1)} s (avg tick ${(elapsed / ticks).toFixed(2)} ms, p95 ${tickTimes[Math.floor(ticks * 0.95)].toFixed(2)} ms, max ${maxTick.toFixed(1)} ms)`,
+    `${minutes} min sim${observerCount > 1 ? `, ${observerCount} zones` : ""} in ${(elapsed / 1000).toFixed(1)} s (avg tick ${(elapsed / ticks).toFixed(2)} ms, p95 ${tickTimes[Math.floor(ticks * 0.95)].toFixed(2)} ms, max ${maxTick.toFixed(1)} ms)`,
 );
 console.log(
   'personality  lives  deaths  avg-life(s)  kills  avg-peak  max-peak  time-at-#1' +

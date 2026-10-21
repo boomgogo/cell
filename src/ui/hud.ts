@@ -25,6 +25,18 @@ export class Hud {
   readonly minimap = $<HTMLCanvasElement>('minimap');
   readonly mute = $<HTMLButtonElement>('mute');
   readonly homeArrow = $<HTMLDivElement>('home-arrow');
+  readonly playBtn = $<HTMLButtonElement>('play');
+  /** "Play with friends": the room URL to host with (ui/friends.ts), or in a room p3p2's panel. */
+  readonly friends = $<HTMLButtonElement>('friends');
+  /** The room line on the menu: the page's room, or why it is in none any more. */
+  readonly room = $<HTMLParagraphElement>('room');
+  /** An invite the page was opened from: where it leads. PLAY reads Join, and Play alone is under it. */
+  readonly invite = $<HTMLParagraphElement>('invite');
+  readonly alone = $<HTMLButtonElement>('alone');
+  readonly hostForm = $<HTMLFormElement>('host-form');
+  readonly roomUrl = $<HTMLInputElement>('room-url');
+  readonly create = $<HTMLButtonElement>('create');
+  readonly hostStatus = $<HTMLParagraphElement>('host-status');
   arcade = false;
   /** Flag atlas for the leaderboard (lazy; null until loaded). */
   flags: Flags | null = null;
@@ -62,6 +74,28 @@ export class Hud {
     } catch {
       /* focus can throw in some embedded browsers */
     }
+  }
+
+  /** The room line (null hides it), and on the Friends button how many are in the room (0: in none). */
+  setRoom(text: string | null, members: number): void {
+    this.room.hidden = !text;
+    this.room.textContent = text ?? '';
+    this.friends.textContent = members > 0 ? `Friends · ${members}` : 'Play with friends';
+  }
+
+  /** An invite to answer: `lead` (null: none), a line under it, and whether Join can be pressed yet. */
+  setInvite(lead: string | null, detail = '', ready = true): void {
+    const on = lead !== null;
+    this.invite.hidden = !on;
+    this.alone.hidden = !on;
+    this.friends.hidden = on;
+    this.playBtn.textContent = on ? 'Join' : 'Play';
+    this.playBtn.disabled = on && !ready;
+    const b = document.createElement('b');
+    b.textContent = lead ?? '';
+    const more = document.createElement('span');
+    more.textContent = detail;
+    this.invite.replaceChildren(b, ...(detail ? [document.createElement('br'), more] : []));
   }
 
   hideMenu(touch: boolean): void {

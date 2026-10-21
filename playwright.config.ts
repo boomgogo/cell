@@ -11,8 +11,10 @@ export default defineConfig({
     launchOptions: { args: ['--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--use-angle=gl-egl'] },
   },
   projects: [
-    { name: 'desktop', use: { viewport: { width: 1280, height: 800 } } },
-    { name: 'phone', use: { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true } },
+    { name: 'desktop', testIgnore: /engines\.spec/, use: { viewport: { width: 1280, height: 800 } } },
+    { name: 'phone', testIgnore: /engines\.spec/, use: { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true } },
+    // Opt-in (`npm run e2e:engines`): Chrome, Firefox and WebKit in one room. It needs Playwright's own Firefox and WebKit.
+    ...(process.env.E2E_ENGINES ? [{ name: 'engines', testMatch: /engines\.spec/, use: { viewport: { width: 1280, height: 800 } } }] : []),
   ],
   webServer: {
     command: 'npm run build && npx vite preview --port 4180 --strictPort',

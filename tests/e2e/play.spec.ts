@@ -2,6 +2,7 @@
 // arcade (default) and base presets. The arcade run also checks the maze HUD (minimap, district banner, points), the
 // home arrow, the paper floor inside a maze and in the plains, and a rainbow explosion. Also: leaderboard masses and
 // the dark press stock.
+import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 
 interface GameHandle {
@@ -199,4 +200,78 @@ test('press stock: dark floor, and the old ?theme=dark name still works', async 
   expect(near(await floorColour(page), PRESS, 26)).toBe(true);
   expect(await page.evaluate(() => document.body.classList.contains('dark'))).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test('menu links: more games on Muon.Day and p3p2.me, at load and after a death', async ({ page }) => {
+  await page.goto('/?seed=5&mute=1&geo=0');
+  const more = page.locator('#menu #more-games');
+  const p3p2 = page.locator('#menu #p3p2-help a');
+  for (const when of ['load', 'death']) {
+    await expect(more, when).toBeVisible();
+    await expect(more).toHaveText('More games on Muon.Day');
+    await expect(more).toHaveAttribute('href', 'https://muon.day');
+    await expect(more).toHaveAttribute('target', '_blank');
+    await expect(p3p2).toHaveAttribute('href', 'https://p3p2.me');
+    await expect(p3p2).toHaveAttribute('target', '_blank');
+    await expect(page.locator('#friends')).toHaveText('Play with friends');
+    if (when === 'death') break;
+    await page.waitForFunction(() => (window as unknown as W).__game?.world.tick > 10);
+    await page.click('#play');
+    await expect(page.locator('#menu')).toBeHidden();
+    await page.evaluate(() => {
+      const g = (window as unknown as W).__game;
+      const npc = g.world.organisms.find((o) => !o.isHuman && !o.resident && o.alive && !o.dormant && o.cells.length > 0)!;
+      const c = npc.cells[0];
+      Object.assign(c.p, g.human.cells[0].p);
+      Object.assign(c.prev, g.human.cells[0].p);
+      c.r = 400;
+    });
+    await expect(page.locator('#death')).toHaveText(/Eaten/, { timeout: 5000 });
+  }
+});
+
+test('the menu fits a 320 px screen, and a phone on its side scrolls to all of it', async ({ page }) => {
+  for (const viewport of [{ width: 320, height: 640 }, { width: 740, height: 360 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/?seed=5&mute=1&geo=0');
+    const panel = page.locator('#menu .panel');
+    const box = (await panel.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // With the room URL to host with open too.
+    await page.locator('#friends').click();
+    for (const id of ['#play', '#friends', '#room-url', '#create', '#fork', '#more-games']) {
+      const el = page.locator(id);
+      await el.scrollIntoViewIfNeeded();
+      // Scrolled into view, an element can sit a fraction of a pixel past the edge.
+      const b = (await el.boundingBox())!;
+      expect(b.y, id).toBeGreaterThanOrEqual(-0.5);
+      expect(b.y + b.height, id).toBeLessThanOrEqual(viewport.height + 0.5);
+      expect(b.x + b.width, id).toBeLessThanOrEqual(viewport.width);
+    }
+  }
+});
+
+test('the version, from the commit, in the corner nothing else uses', async ({ page }, info) => {
+  const sha = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
+  await page.goto('/?seed=5&mute=1&geo=0');
+  const ver = page.locator('#ver');
+  await expect(ver).toHaveText(`v.${sha.slice(0, 4)}`);
+  await expect(ver).toBeVisible();
+  await page.waitForFunction(() => (window as unknown as W).__game?.world.tick > 10);
+  await page.click('#play');
+  await expect(page.locator('#menu')).toBeHidden();
+  if (info.project.name === 'phone') await expect(page.locator('#btn-split')).toBeVisible();
+  const v = (await ver.boundingBox())!;
+  const vp = page.viewportSize()!;
+  expect(v.x + v.width).toBeLessThanOrEqual(vp.width);
+  expect(v.y + v.height).toBeLessThanOrEqual(vp.height);
+  for (const id of ['#leaderboard', '#score', '#arcade-hud', '#minimap', '#mute', '#btn-split', '#btn-eject', '#banner']) {
+    const el = page.locator(id);
+    if (!(await el.isVisible())) continue;
+    const b = (await el.boundingBox())!;
+    const overlap = v.x < b.x + b.width && b.x < v.x + v.width && v.y < b.y + b.height && b.y < v.y + v.height;
+    expect(overlap, `${id} covers the version`).toBe(false);
+  }
 });

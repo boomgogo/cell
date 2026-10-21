@@ -26,6 +26,8 @@ export class FoodStore {
   kind: Uint8Array;
   /** Maze spot of the item: district << 16 | slot (−1 for pellets in the plains). */
   tag: Int32Array;
+  /** How many times each slot has been filled: in a room, how the host tells a guest that a pellet is a new one. */
+  gen: Uint32Array;
   /** Live pellets, plains and maze spots alike (the food target counts these; power pellets don't count). */
   pellets = 0;
   private free: number[] = [];
@@ -44,6 +46,7 @@ export class FoodStore {
     this.alive = new Uint8Array(capacity);
     this.kind = new Uint8Array(capacity);
     this.tag = new Int32Array(capacity);
+    this.gen = new Uint32Array(capacity);
     this.grid = new Grid3(FOOD_GRID_CELL, R, false);
   }
 
@@ -70,6 +73,9 @@ export class FoodStore {
     const nt = new Int32Array(cap);
     nt.set(this.tag);
     this.tag = nt;
+    const ng = new Uint32Array(cap);
+    ng.set(this.gen);
+    this.gen = ng;
     this.capacity = cap;
   }
 
@@ -87,6 +93,7 @@ export class FoodStore {
     this.alive[i] = 1;
     this.kind[i] = kind;
     this.tag[i] = tag;
+    this.gen[i]++;
     this.count++;
     if (kind === PELLET) this.pellets++;
     const R = this.R;

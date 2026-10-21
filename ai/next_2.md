@@ -51,6 +51,11 @@ You chose two changes.
 
   The panel's check of a room URL as it is typed is gone: a bad one is reported when **Create the invite link** is
   pressed. Initial load 54.7 KB gzip (53.6 before).
+- **The rainbow at quality 5–6.** You saw a rainbow cell flash random colours. That was not new in plan 2: with
+  minimal effects (levels 5–6, when a page is slow) the spinning wheel gave way to a single colour that stepped
+  through all 12 inks, navy and plum among them, at a different point on each cell. It now steps through seven rainbow
+  inks in wheel order (red, orange, amber, green, emerald, cornflower, purple: the wheel's six and orange), 0.4 s each,
+  the same on every rainbow cell and spore at once. Levels 0–4 are unchanged.
 
 ## Found and fixed
 
@@ -116,7 +121,7 @@ full around N district start tiles, on the i7-7700HQ / HD 630 laptop, frame p95 
 
 ## Tests
 
-- **`npm test`:** 168 of 168. New in `tests/unit/net.test.ts`, which runs a host and guests in Node through an
+- **`npm test`:** 169 of 169. New in `tests/unit/net.test.ts`, which runs a host and guests in Node through an
   in-memory room:
   - wire round trip;
   - the rules;

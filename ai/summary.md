@@ -84,6 +84,8 @@ The key decisions, and why:
     Since plan 0 it judges load rather than vsync (a slow median interval, or frame work filling most of the interval),
     resizes the canvas only when the pixel size changes and only before a render, and stops stepping back up after a
     flip-flop.
+  - With minimal effects (levels 5–6), or without conic gradients, the rainbow wheel becomes one ink at a time: seven
+    rainbow inks in wheel order, 0.4 s each, the same on every rainbow cell and spore at once.
   - Walls, region borders, the floor grid and junction emblems are drawn into a cached static layer. It is redrawn
     only when the camera has moved or zoomed enough.
 - **Lazy maze generation.** Districts are generated in idle time, nearest first (about 10 ms each).

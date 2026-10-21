@@ -2,7 +2,7 @@
 // stock; inks that can meet at a region border must stay apart, also for deuteranopes (lightness survives colour blindness).
 import { describe, expect, it } from 'vitest';
 import { GHOSTS } from '../../src/ai/population.ts';
-import { INKS, PAPER, PRESS, contrast, inkFor, inkSlot } from '../../src/render/canvas/palette.ts';
+import { INKS, PAPER, PRESS, RAINBOW_FILL, RAINBOW_STEPS, contrast, inkFor, inkSlot } from '../../src/render/canvas/palette.ts';
 
 const lin = (c: number) => (c <= 10.31475 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
 const rgbLin = (hex: string) => [1, 3, 5].map((k) => lin(parseInt(hex.slice(k, k + 2), 16)));
@@ -49,6 +49,15 @@ describe('risograph palette', () => {
       expect(dL, `${k} vs ${(k + 2) % 12}: ΔL*`).toBeGreaterThanOrEqual(15);
       expect(dE(deuteranope(a), deuteranope(b)), `${k} vs ${(k + 2) % 12}: deuteranope ΔE`).toBeGreaterThanOrEqual(18);
     }
+  });
+
+  it('the rainbow without its wheel steps through at least 7 inks: the wheel\'s, in the wheel\'s order', () => {
+    expect(new Set(RAINBOW_STEPS).size).toBe(RAINBOW_STEPS.length);
+    expect(RAINBOW_STEPS.length).toBeGreaterThanOrEqual(7);
+    expect(RAINBOW_STEPS.filter((ink) => RAINBOW_FILL.includes(ink))).toEqual(RAINBOW_FILL);
+    // Round the hue wheel in one direction, so it reads as a rainbow, not as random colours.
+    const slots = RAINBOW_STEPS.map((ink) => INKS.indexOf(ink));
+    expect(slots).toEqual([...slots].sort((a, b) => a - b));
   });
 
   it('the four resident phages have inks of their own: distinct, and none of red, orange, amber, green, aqua or pink', () => {

@@ -16,7 +16,7 @@ import { type BackgroundPattern, drawBackground } from './background.ts';
 import type { Flags } from './flags.ts';
 import { Fx } from './fx.ts';
 import { Membrane, type MembraneBody, stepMembrane } from './membrane.ts';
-import { INKS, RAINBOW_FILL, VIRUS_FILL, fillColor, floorColor, glowColor, stock } from './palette.ts';
+import { INKS, RAINBOW_FILL, RAINBOW_STEPS, VIRUS_FILL, fillColor, floorColor, glowColor, stock } from './palette.ts';
 import { PELLET_BUCKETS, drawPellet, hueBucket, pelletSide } from './sprites.ts';
 import { StaticLayer } from './staticLayer.ts';
 import { textFrame, textSprite } from './text.ts';
@@ -130,6 +130,8 @@ const POPUP_MS = 900;
 const ORB_R = 40;
 const ORB_MIN_PX = 9;
 const PING_MS = 1200;
+/** How long each of the RAINBOW_STEPS shows: fewer than 3 changes a second. */
+const RAINBOW_STEP_MS = 400;
 const SHAKE_MS = 250;
 
 const GHOST_MS = 120;
@@ -561,7 +563,7 @@ export class CanvasRenderer {
     }
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = this.rainbowStyle(x, y, (now / 1000) * Math.PI, RAINBOW_FILL, cycle);
+    ctx.fillStyle = this.rainbowStyle(x, y, (now / 1000) * Math.PI, RAINBOW_FILL, now);
     ctx.fill();
     ctx.lineWidth = Math.max(1.5, 4 * zoom);
     ctx.strokeStyle = stock.key;
@@ -572,9 +574,12 @@ export class CanvasRenderer {
     ctx.fill();
   }
 
-  /** A spinning rainbow wheel around (x, y), or a hue-cycling colour where conic gradients are missing or fx is minimal. */
-  private rainbowStyle(x: number, y: number, rot: number, stops: string[], cycle: number): CanvasGradient | string {
-    if (!this.hasConic || this.opts.fx >= 2) return fillColor(cycle);
+  /**
+   * A spinning rainbow wheel around (x, y), or where conic gradients are missing or fx is minimal, the rainbow one ink
+   * at a time: the same ink on every rainbow cell and spore at once, so a colony still reads as one rainbow thing.
+   */
+  private rainbowStyle(x: number, y: number, rot: number, stops: string[], now: number): CanvasGradient | string {
+    if (!this.hasConic || this.opts.fx >= 2) return RAINBOW_STEPS[Math.floor(now / RAINBOW_STEP_MS) % RAINBOW_STEPS.length];
     const g = this.ctx.createConicGradient(rot, x, y);
     const n = stops.length;
     for (let k = 0; k < n; k++) g.addColorStop(k / n, stops[k]);
@@ -918,7 +923,7 @@ export class CanvasRenderer {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = this.rainbowStyle(v.sx, v.sy, rot, RAINBOW_FILL, cycle);
+    ctx.fillStyle = this.rainbowStyle(v.sx, v.sy, rot, RAINBOW_FILL, now);
     ctx.fill();
     const lw = keyline(v.dr * zoom);
     if (lw > 0) {

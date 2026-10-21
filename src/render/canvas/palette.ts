@@ -59,6 +59,11 @@ export const DOOR_LIGHT = INKS[10];
 
 /** Rainbow wheel: six inks round the wheel, outlined in key. */
 export const RAINBOW_FILL = [0, 2, 4, 5, 8, 9].map((k) => INKS[k]);
+/**
+ * The rainbow where the wheel isn't drawn (minimal effects, or no conic gradients): the wheel's inks and orange, one
+ * at a time in wheel order (red, orange, amber, green, emerald, cornflower, purple), so it reads as the same rainbow.
+ */
+export const RAINBOW_STEPS = [0, 1, 2, 4, 5, 8, 9].map((k) => INKS[k]);
 
 let screens = new Map<string, string>();
 

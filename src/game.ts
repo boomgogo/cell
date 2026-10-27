@@ -87,8 +87,6 @@ export class Game {
   human: Organism;
   /** The room, while the page is in one. See `GameNet`. */
   net: GameNet | null = null;
-  /** While the page holds an invite it has not answered (ui/friends.ts): what PLAY and Enter do instead. */
-  invite: ((name: string) => void) | null = null;
   readonly difficulty: (typeof DIFFICULTY)[keyof typeof DIFFICULTY];
   state: GameState = 'menu';
   readonly stats: FrameStats = { fps: 0, frameMs: 0, tickMs: 0, p95: 0 };
@@ -192,9 +190,7 @@ export class Game {
     window.addEventListener('resize', () => (this.pendingResize = true));
     this.hud.form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const name = this.hud.nick.value.trim().slice(0, 15);
-      if (this.invite) this.invite(name);
-      else this.play(name);
+      this.play(this.hud.nick.value.trim().slice(0, 15));
     });
     const press = (el: HTMLElement, fn: () => void) =>
       el.addEventListener('pointerdown', (e) => {
@@ -297,6 +293,17 @@ export class Game {
     if (this.state === 'playing' && this.human.alive && this.human.cells.length > 0) return;
     this.state = 'menu';
     this.hud.showMenu(message);
+    this.hud.setBanner('', '');
+  }
+
+  /**
+   * In a room, on a page that has just come in as a guest (an invite's Join? answered in the middle of a game): its
+   * colony was in a world of its own, which is gone. Back to the menu, where PLAY puts it into the host's world.
+   */
+  joined(): void {
+    if (this.state === 'menu') return;
+    this.state = 'menu';
+    this.hud.showMenu(null);
     this.hud.setBanner('', '');
   }
 

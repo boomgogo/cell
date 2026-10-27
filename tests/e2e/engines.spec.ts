@@ -30,9 +30,9 @@ async function launch(engine: typeof firefox): Promise<Browser | string> {
 
 test('Chrome, Firefox and WebKit in one room: the same mazes, and the host’s world on each', async ({ browser, p3p2 }) => {
   test.setTimeout(120_000);
-  const roomUrl = await createRoom(browser, p3p2, 'Engines');
+  const owner = await createRoom(browser, p3p2, 'Engines');
   const ada = await player(browser, '/?mute=1&geo=0&district=8');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   await play(ada.page, 'Ada');
   const chrome = await ada.page.evaluate(MAZES);
 

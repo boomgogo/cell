@@ -15,7 +15,7 @@ A browser game, alone or with a friend. You are a bacterium on the surface of a 
 - **Look.** Everything is drawn like a risograph print.
 
 It is a static site (Vite + TypeScript) and needs no server of its own. Its one runtime dependency is p3p2's client
-(`@p3p2/client`): playing with a friend takes a p3p2 server, and the room's code loads only when a room is opened
+(`@p3p2/client` 0.2): playing with a friend takes a p3p2 server, and the room's code loads only when a room is opened
 (§3, plan 2).
 
 ## 2. Spec and budgets
@@ -103,8 +103,12 @@ The key decisions, and why:
   - At most eight play at once (`MAX_PLAYERS`): the host's cost grows with how far apart the players are, to a frame
     p95 of about 41 ms at 4× throttling for eight in eight districts. Anyone else watches. A newcomer looks where the
     host looks and starts near a friend.
-  - The menu hosts and answers invites itself (`ui/friends.ts`), so the menu's name is the room's; p3p2's panel shows
-    only in a room, with the invite link, who is here and chat.
+  - p3p2's button and panel are used as they come (plan 3): the button in the top-right corner, with the leaderboard
+    under it; the panel's own *Join?* (with the characters a front-page link leaves out, and another name when the
+    room has that one); in a room, the invite link, who is here, and chat, which Enter opens during play. The menu's
+    Play with friends opens the same panel. A room is made in a p3p2 server's portal, and its owner joins through its
+    invite link like everybody else (p3p2 0.2 has no hosting from the game). In a room the menu's name is the room's,
+    read-only; a page that joins as a guest in the middle of a game alone goes back to the menu.
   - The first page in a room sets the rules (`?preset=`, `mapSeed`, …); a page with other rules reloads into them.
     `game.version` is the build's commit, so different builds don't share a room.
 
@@ -219,10 +223,11 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
   - Cells under ~20 px on screen are plain circles.
 - **The HUD** is plain DOM with paper panels, key borders and flat offset ink shadows. In arcade the bottom-left box
   is the **Mass** (the points are the score there); the death card shows the run's points and peak mass.
-  - The leaderboard shows the top 10 plus your own row, each with its mass.
+  - The leaderboard shows the top 10 plus your own row, each with its mass (on a screen under 480 px tall, the top 5).
+    It sits under p3p2's button, in the top-right corner.
   - The arcade HUD shows points, high score, a rainbow bar, a district banner, toasts, a globe minimap and a home arrow.
-- **The menu** has Play, Play with friends (p3p2's panel, with a line to p3p2.me for whoever sets up the room), and
-  links to the repository and to more games on Muon.Day. It scrolls on a phone on its side. The bottom-right corner
+- **The menu** has Play, Play with friends (p3p2's panel, which outside a room says what playing with friends takes,
+  with a link to p3p2.me), and links to the repository and to more games on Muon.Day. It scrolls on a phone on its side. The bottom-right corner
   shows the version, `v.` and the first 4 characters of the build's commit.
 - **Sound** is WebAudio oscillators and one noise buffer, loaded on the first Play: chomp, rainbow loop, explosion, and
   swell.
@@ -235,8 +240,9 @@ A cell that eats a virus bursts into pieces flying off in random directions (`po
   - Path flood and residents, maze food and spores, rainbow explosions, packing, home cues, leaderboard rows.
   - Ink contrast and resident inks, an NPC arena smoke test, and "big NPCs keep exploring".
 - **`npm run e2e`:** Playwright on the production build with the system Chrome, on desktop and phone viewports, for the
-  `arcade` and `base` presets. With a p3p2 checkout (`~/Repos/p3p2`, or `P3P2_DIR`) it also plays friends through a
-  local server: one world, the host leaving, a reload, a bad connection, a phone, a full world, the rules.
+  `arcade` and `base` presets. With a p3p2 checkout of 0.2 or later (`P3P2_DIR`, `~/Repos/p3p2` or `../p3p2`) it also
+  plays friends through a local server: one world, the panel's *Join?*, a front-page link, joining mid-game, chat
+  during play, the host leaving, a reload, a bad connection, a phone, a full world, the rules.
   `npm run e2e:engines` puts Chrome, Firefox and WebKit in one room. The single-player tests cover:
   - menu → play → eaten → play again
   - the arcade HUD

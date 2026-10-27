@@ -17,7 +17,10 @@
       [hidden] { display: none !important; }
       .box { background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; box-shadow: 3px 3px 0 var(--emerald); }
       #score { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); padding: 2px 8px; font-weight: 800; font-size: 20px; pointer-events: none; box-shadow: 3px 3px 0 var(--coral); }
-      #leaderboard { position: fixed; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); width: 240px; padding: 8px 12px 10px; pointer-events: none; box-shadow: 4px 4px 0 var(--amber); }
+      /* p3p2's button, as it comes, in its top-right corner (src/main.ts), with the safe-area inset the rest of the HUD has. */
+      p3p2-panel { top: max(12px, env(safe-area-inset-top)) !important; right: max(12px, env(safe-area-inset-right)) !important; }
+      /* Under p3p2's button: 34 px, and 8 between. */
+      #leaderboard { position: fixed; right: max(12px, env(safe-area-inset-right)); top: calc(max(12px, env(safe-area-inset-top)) + 42px); width: 240px; padding: 8px 12px 10px; pointer-events: none; box-shadow: 4px 4px 0 var(--amber); }
       #leaderboard h2 { margin: 0 0 6px; font-size: 15px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; text-align: center; border-bottom: 2px solid var(--key); padding-bottom: 4px; }
       #lb { margin: 0; padding: 0; list-style: none; font-weight: 700; font-size: 15px; }
       #lb li { display: flex; gap: 6px; white-space: nowrap; padding: 0 3px; }
@@ -32,22 +35,13 @@
       .panel h1 { margin: 0; font-size: 52px; font-weight: 900; letter-spacing: 2px; text-shadow: 3px 2px 0 var(--coral); }
       .tag { margin: 2px 0 14px; opacity: 0.75; }
       #play-form { display: flex; flex-direction: column; gap: 10px; }
-      #nick, #room-url { font: inherit; padding: 10px 12px; background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; -webkit-user-select: text; user-select: text; }
+      #nick { font: inherit; padding: 10px 12px; background: var(--paper); color: var(--key); border: 2px solid var(--key); border-radius: 2px; -webkit-user-select: text; user-select: text; }
       #nick[readonly] { border-style: dashed; }
       #play { font: inherit; font-weight: 800; letter-spacing: 1px; padding: 10px; border: 2px solid var(--key); border-radius: 2px; background: var(--coral); color: #241f1c; cursor: pointer; box-shadow: 3px 3px 0 var(--key); }
       #play:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--key); }
       .help { margin: 12px 0 0; font-size: 13px; opacity: 0.75; }
-      #friends, #alone, #create { font: inherit; font-weight: 700; letter-spacing: 0.5px; padding: 8px 10px; border: 2px solid var(--key); border-radius: 2px; background: var(--paper); color: var(--key); cursor: pointer; box-shadow: 3px 3px 0 var(--key); }
-      #friends:active, #alone:active, #create:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--key); }
-      #play:disabled, #create:disabled { opacity: 0.6; cursor: default; }
-      #invite { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
-      #host-form { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 0; }
-      #host-status { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
-      /* p3p2's panel, only in a room: the menu hosts and answers invites itself (src/ui/friends.ts). */
-      body:not(.in-room) p3p2-panel { display: none; }
-      .help a { color: var(--key); font-weight: 700; text-decoration: none; border-bottom: 2px solid var(--purple); }
-      .help a:hover, .help a:focus-visible { background: color-mix(in srgb, var(--purple) 25%, transparent); outline: none; }
-      #p3p2-help { margin-top: 8px; }
+      #friends { font: inherit; font-weight: 700; letter-spacing: 0.5px; padding: 8px 10px; border: 2px solid var(--key); border-radius: 2px; background: var(--paper); color: var(--key); cursor: pointer; box-shadow: 3px 3px 0 var(--key); }
+      #friends:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--key); }
       .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; margin: 14px 0 0; }
       .fork, .more { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--key); text-decoration: none; border-bottom: 3px solid var(--emerald); padding: 0 1px 1px; }
       .more { border-bottom-color: var(--amber); }
@@ -77,6 +71,10 @@
       #home-arrow b { display: block; background: var(--paper); }
       #debug-panel { position: fixed; left: 8px; top: 8px; padding: 8px 10px; background: rgba(0, 0, 0, 0.7); color: #fff; font: 12px/1.5 ui-monospace, monospace; border-radius: 6px; display: flex; flex-direction: column; gap: 2px; max-width: calc(100vw - 32px); }
       #debug-panel pre { margin: 4px 0 0; }
+      /* Short screens (a phone on its side): the top 5 and your own row, so the board ends above Split and W. */
+      @media (max-height: 480px) {
+        #lb li:nth-child(n + 6):not(.me) { display: none; }
+      }
       @media (max-width: 560px) {
         #leaderboard { width: 168px; padding: 4px 8px 6px; }
         #leaderboard h2 { font-size: 11px; letter-spacing: 2px; }
@@ -110,17 +108,9 @@
         <p class="tag">bacteria eat bacteria — on a sphere</p>
         <form id="play-form">
           <input id="nick" maxlength="15" placeholder="Rad" autocomplete="off" spellcheck="false" aria-label="Your name" />
-          <p id="invite" role="status" hidden></p>
           <button id="play" type="submit">Play</button>
-          <button id="alone" type="button" hidden>Play alone</button>
           <button id="friends" type="button">Play with friends</button>
         </form>
-        <form id="host-form" hidden>
-          <input id="room-url" aria-label="Room URL" placeholder="Paste a room URL" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <button id="create" type="submit">Create the invite link</button>
-          <p id="host-status" role="status" hidden></p>
-        </form>
-        <p class="help" id="p3p2-help">Hosting? Get a room URL at <a href="https://p3p2.me" target="_blank" rel="noopener">p3p2.me</a></p>
         <p class="help">Steer with mouse or finger · <b>Space</b> split · <b>W</b> eject</p>
         <p class="help" id="arcade-help" hidden>Rainbow spores in the mazes let you explode bigger cells · find your way home</p>
         <p class="links"><a class="fork" id="fork" href="https://github.com/boomgogo/cell" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>Fork me on GitHub</a><a class="more" id="more-games" href="https://muon.day" target="_blank" rel="noopener">More games on Muon.Day</a></p>

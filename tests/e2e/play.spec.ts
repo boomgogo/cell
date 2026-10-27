@@ -168,9 +168,11 @@ for (const preset of ['arcade', 'base']) {
       });
     }
 
-    // Drop a huge NPC cell onto the player so it gets eaten on the next tick.
+    // Drop a huge NPC cell onto the player so it gets eaten on the next tick. In arcade the pieces of the NPC it just
+    // exploded, next to it and no longer afraid of it, may have eaten it already: eaten all the same.
     await page.evaluate(() => {
       const g = (window as unknown as W).__game;
+      if (g.human.cells.length === 0) return;
       const npc = g.world.organisms.find((o) => !o.isHuman && !o.resident && o.alive && !o.dormant && o.cells.length > 0)!;
       const target = g.human.cells[0].p;
       const c = npc.cells[0];
@@ -202,18 +204,23 @@ test('press stock: dark floor, and the old ?theme=dark name still works', async 
   expect(errors).toEqual([]);
 });
 
-test('menu links: more games on Muon.Day and p3p2.me, at load and after a death', async ({ page }) => {
+test('menu links: more games on Muon.Day, and Play with friends opens p3p2’s panel with p3p2.me, at load and after a death', async ({ page }) => {
   await page.goto('/?seed=5&mute=1&geo=0');
   const more = page.locator('#menu #more-games');
-  const p3p2 = page.locator('#menu #p3p2-help a');
+  const panel = page.getByRole('dialog', { name: 'Multiplayer' });
+  const p3p2 = panel.getByRole('link', { name: 'p3p2.me' });
   for (const when of ['load', 'death']) {
     await expect(more, when).toBeVisible();
     await expect(more).toHaveText('More games on Muon.Day');
     await expect(more).toHaveAttribute('href', 'https://muon.day');
     await expect(more).toHaveAttribute('target', '_blank');
-    await expect(p3p2).toHaveAttribute('href', 'https://p3p2.me');
-    await expect(p3p2).toHaveAttribute('target', '_blank');
     await expect(page.locator('#friends')).toHaveText('Play with friends');
+    await page.locator('#friends').click();
+    await expect(panel).toContainText('Open the invite link from the server.');
+    await expect(p3p2).toHaveAttribute('href', 'https://p3p2.me/');
+    await expect(p3p2).toHaveAttribute('target', '_blank');
+    await panel.getByRole('button', { name: 'Close' }).click();
+    await expect(panel).toBeHidden();
     if (when === 'death') break;
     await page.waitForFunction(() => (window as unknown as W).__game?.world.tick > 10);
     await page.click('#play');
@@ -239,9 +246,7 @@ test('the menu fits a 320 px screen, and a phone on its side scrolls to all of i
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    // With the room URL to host with open too.
-    await page.locator('#friends').click();
-    for (const id of ['#play', '#friends', '#room-url', '#create', '#fork', '#more-games']) {
+    for (const id of ['#play', '#friends', '#fork', '#more-games']) {
       const el = page.locator(id);
       await el.scrollIntoViewIfNeeded();
       // Scrolled into view, an element can sit a fraction of a pixel past the edge.
@@ -267,11 +272,85 @@ test('the version, from the commit, in the corner nothing else uses', async ({ p
   const vp = page.viewportSize()!;
   expect(v.x + v.width).toBeLessThanOrEqual(vp.width);
   expect(v.y + v.height).toBeLessThanOrEqual(vp.height);
-  for (const id of ['#leaderboard', '#score', '#arcade-hud', '#minimap', '#mute', '#btn-split', '#btn-eject', '#banner']) {
+  for (const id of ['#leaderboard', '#score', '#arcade-hud', '#minimap', '#mute', '#btn-split', '#btn-eject', '#banner', 'p3p2-panel']) {
     const el = page.locator(id);
     if (!(await el.isVisible())) continue;
     const b = (await el.boundingBox())!;
     const overlap = v.x < b.x + b.width && b.x < v.x + v.width && v.y < b.y + b.height && b.y < v.y + v.height;
     expect(overlap, `${id} covers the version`).toBe(false);
   }
+});
+
+test('p3p2’s button: in its top-right corner, over nothing of the game’s, on the menu and in play; its panel fits', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'desktop', 'it makes its own phones');
+  type Box = { x: number; y: number; width: number; height: number };
+  const overlap = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  const views = [
+    { width: 1280, height: 800, touch: false },
+    { width: 412, height: 915, touch: true },
+    { width: 320, height: 640, touch: true },
+    // A phone on its side: the leaderboard shows the top 5 and your own row, and ends above Split and W.
+    { width: 740, height: 360, touch: true },
+  ];
+  for (const v of views) {
+    const at = `${v.width}×${v.height}`;
+    const context = await browser.newContext({ viewport: { width: v.width, height: v.height }, isMobile: v.touch, hasTouch: v.touch });
+    const page = await context.newPage();
+    await page.goto('/?seed=5&mute=1&geo=0&district=6');
+    await page.waitForFunction(() => (window as unknown as W).__game?.world.tick > 10);
+    const pill = page.locator('p3p2-panel').getByRole('button', { name: /^Multiplayer/ });
+    await expect(pill, at).toBeVisible();
+    const clear = async (ids: string[], what: string) => {
+      const p = (await pill.boundingBox())!;
+      expect(Math.round(p.y), at).toBe(12);
+      expect(Math.round(v.width - p.x - p.width), at).toBe(12);
+      for (const id of ids) {
+        const el = page.locator(id);
+        if (!(await el.isVisible())) continue;
+        expect(overlap(p, (await el.boundingBox())!), `${at}, ${what}: the button covers ${id}`).toBe(false);
+      }
+    };
+    await clear(['#nick', '#play', '#friends', '#fork', '#more-games', '#leaderboard', '#minimap', '#mute', '#banner'], 'menu');
+
+    if (v.touch) await page.locator('#play').tap();
+    else await page.click('#play');
+    await expect(page.locator('#menu')).toBeHidden();
+    if (v.touch) await expect(page.locator('#btn-split')).toBeVisible();
+    await page.waitForTimeout(800);
+    await clear(['#leaderboard', '#score', '#arcade-hud', '#minimap', '#mute', '#btn-split', '#btn-eject', '#banner', '#ver'], 'play');
+    if (v.touch) {
+      const board = (await page.locator('#leaderboard').boundingBox())!;
+      for (const id of ['#btn-split', '#btn-eject']) expect(overlap(board, (await page.locator(id).boundingBox())!), `${at}: the leaderboard covers ${id}`).toBe(false);
+    }
+
+    if (v.touch) await pill.tap();
+    else await pill.click();
+    const dialog = page.getByRole('dialog', { name: 'Multiplayer' });
+    await expect(dialog).toBeVisible();
+    const d = (await dialog.boundingBox())!;
+    expect(d.x, at).toBeGreaterThanOrEqual(0);
+    expect(d.x + d.width, at).toBeLessThanOrEqual(v.width);
+    expect(d.y + d.height, at).toBeLessThanOrEqual(v.height);
+    await context.close();
+  }
+});
+
+test('Enter twice in the name field plays once', async ({ page }) => {
+  await page.goto('/?seed=5&mute=1&geo=0');
+  await page.waitForFunction(() => (window as unknown as W).__game?.world.tick > 10);
+  await page.evaluate(() => {
+    const g = (window as unknown as W).__game as unknown as { play(name: string): void; plays: number };
+    const play = g.play.bind(g);
+    g.plays = 0;
+    g.play = (name) => {
+      g.plays++;
+      play(name);
+    };
+  });
+  await page.locator('#nick').focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#menu')).toBeHidden();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => ((window as unknown as W).__game as unknown as { plays: number }).plays)).toBe(1);
 });

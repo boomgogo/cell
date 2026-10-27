@@ -394,6 +394,8 @@ export class Net implements GameNet {
       this.sent = { view: 0, save: 0, views: 0, since: performance.now() };
     } else {
       this.becomeGuest();
+      // In from a game alone (the panel's Join?, answered mid-game): that colony was in this page's own world.
+      if (was === null) this.game.joined();
     }
   }
 

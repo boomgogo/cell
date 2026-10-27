@@ -50,7 +50,7 @@ npm run dev
 | `npm run preview:cf` | Build, then serve `dist/` through the local Cloudflare runtime (`wrangler dev`) |
 | `npm run deploy` | Build, then deploy to Cloudflare Workers (`wrangler deploy`) |
 | `npm test` | Unit tests (Vitest): sphere math, rules, mechanics, virus pop pieces, lap test, NPC arena smoke test, big NPCs keep exploring, leaderboard rows, ink palette contrast and resident inks, jelly membrane, maze generator/walls, maze food and rainbow spores, rainbow explosions, packing (escape field, overgrown cells get out), path flood + resident phages, home/lap cues, adaptive quality (no flip-flopping at 60/120/144 Hz), NPC countries by population, the country lookup chain, arcade points (own cells merging back score nothing), the autoplayer (it sees only the screen, flees, chases, splits only when safe, moves like a hand, plays the same game twice) |
-| `npm run e2e` | Playwright e2e (menu → play → eaten → respawn, arcade HUD, paper floor in and out of mazes, a rainbow explosion, the press stock, country flags with a stubbed Cloudflare trace, the GitHub and Muon.Day links, the menu on small screens, the version label, no blank frame on a quality change) on desktop + phone viewports for the `arcade` and `base` presets, using system Chrome. With a p3p2 checkout, also friends in one world through a local server: one world, starting near a friend, eating and being eaten, the host leaving, a reload, a bad connection, a phone, a full world, the room's rules |
+| `npm run e2e` | Playwright e2e (menu → play → eaten → respawn, arcade HUD, paper floor in and out of mazes, a rainbow explosion, the press stock, country flags with a stubbed Cloudflare trace, the GitHub and Muon.Day links, the menu on small screens, the version label, p3p2's button over nothing of the game's, no blank frame on a quality change) on desktop + phone viewports for the `arcade` and `base` presets, using system Chrome. With a p3p2 checkout (0.2 or later), also friends in one world through a local server: one world, starting near a friend, eating and being eaten, the panel's Join? (play alone, no name, a name taken, removed in the portal), a front-page link, joining mid-game, chat during play, the host leaving, a reload, a bad connection, a phone, a full world, the room's rules |
 | `npm run e2e:engines` | Chrome, Firefox and WebKit in one room, with the same mazes tile for tile (Playwright's own Firefox and WebKit: `npx playwright install firefox webkit`; WebKit on Linux also needs `sudo npx playwright install-deps webkit`) |
 | `npm run p3p2` | A local p3p2 server for trying friends on one machine (see [Playing with friends](#playing-with-friends)) |
 | `npm run flags` | Rebuild the flag atlas (`src/assets/flags.webp` + `flagIndex.ts`) from `flag-icons` with system Chrome; the output is committed |
@@ -126,19 +126,27 @@ Your country is looked up once in idle time and cached for a week, trying in ord
 
 ## Playing with friends
 
-Through [p3p2](https://p3p2.me) (`@p3p2/client`): rooms, invite links and chat through a small server of your own. Alone,
-the game is what it was: the page loads p3p2's 2 KB entry and asks no server anything. The room's code loads when a room
-is opened.
+Through [p3p2](https://p3p2.me) (`@p3p2/client` 0.2): rooms, invite links and chat through a small server of your own.
+Alone, the game is what it was: the page loads p3p2's 2 KB entry and asks no server anything. The room's code loads
+when a room is opened.
 
-- **Hosting.** You need a room URL from a p3p2 server. [p3p2.me](https://p3p2.me) explains both ways to get one: its
-  hub makes a free temporary server (one room, up to 5 people, for an hour), or you can run your own. The room's game
-  URL is the address you play at (`https://c0.muon.day/`). Type your name, press **Play with friends**, paste the
-  room URL, press **Create the invite link** and send the link.
-- **Joining.** Whoever opens the invite is asked on the menu, *Join ‹room›?*, and joins with the name they typed
-  there (or plays alone). They start by looking where the host looks, and PLAY puts their colony near a friend.
-- **One name.** The name on the menu is the one the room knows, in p3p2's panel and chat too. p3p2 has no renaming,
-  so in a room the name can't be changed until the room is over. The panel (invite link, QR code, who is here, chat)
-  shows only in a room: press **Friends**.
+- **p3p2's button and panel, as they come.** The button with p3p2's mark sits in the top-right corner, above the
+  leaderboard: gray alone, teal while in a room, with how many are here and a badge for unread chat. It and the menu's
+  **Play with friends** open p3p2's panel: outside a room it says what playing with friends takes, with a link to
+  p3p2.me; in a room it has the invite link and QR code, who is here, and chat. In a room, Enter during play opens the
+  chat (Enter in the menu's name field still plays).
+- **Hosting.** You need a room on a p3p2 server. [p3p2.me](https://p3p2.me) explains both ways to get one: its hub
+  makes a free temporary server (one room, up to 5 people, for an hour), or you can run your own. Create the room in
+  the server's portal, with the address you play at as its game URL (`https://c0.muon.day/`), and press **Open** on
+  the room's page: the game opens with the room's invite link and asks *Join?*. The first one in runs the world. Send
+  the link (in the panel, or on the room's page) to your friends.
+- **Joining.** Whoever opens the invite is asked in the panel, *Join ‹room›?*, with a name, or plays alone. A link
+  from a server's front page leaves the last characters out, and the panel asks for them. A newcomer starts by looking
+  where the host looks, and PLAY puts their colony near a friend. Joining in the middle of a game alone goes back to
+  the menu, in the room.
+- **One name.** The name given in *Join?* is the one the room knows: on the menu (read-only while in the room; p3p2
+  has no renaming), on the colony (its first 15 characters), in the panel and in chat. A room refuses a name one of
+  its players has. The room's owner removes players, and ends the game, on the room's page in the portal.
 - **One world, on the host's page.** The host's page runs the world, in full around every player. Each guest's page
   draws what the host sends it, 12.5 times a second, and sends where it steers 25 times a second.
 - **A guest's own cells answer the mouse at once.** A guest's page moves its own cells itself, with the world's own
@@ -169,9 +177,10 @@ npm run p3p2                 # a server on port 8080, its database in memory; pr
 npm run dev -- --host        # the game on this machine's LAN address
 ```
 
-In the portal, create a room for `http://<LAN address>:5173/`. Paste its room URL into **Play with friends**, and
-open the invite in another browser or profile (two tabs of one profile are one player), or on a phone on the same
-Wi-Fi. `P3P2_DIR` points at another checkout. `npm run p3p2` also prints how to put p3p2's lag proxy in between.
+In the portal, create a room for `http://<LAN address>:5173/`, and press **Open** on its page. Open the same invite
+link in another browser or profile (two tabs of one profile are one player), or on a phone on the same Wi-Fi.
+`npm run p3p2` looks for the checkout in `P3P2_DIR`, then `~/Repos/p3p2`, then beside this one (`../p3p2`), and
+also prints how to put p3p2's lag proxy in between. The tests need p3p2 0.2 or later.
 
 `npm run e2e` starts a server like this for each multiplayer test; without a checkout those tests are skipped.
 

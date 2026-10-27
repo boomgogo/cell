@@ -10,10 +10,11 @@ const game = new Game(canvas, loadConfig(params), params);
 game.start(params.has('manual'));
 
 // Friends on one sphere, through a p3p2 server (net/Net.ts). The library's entry is under 2 KB, and an ordinary
-// visit asks no server anything; the room's code, here and in the library, loads when a room is opened. The menu hosts
-// and answers invites with its own name (ui/friends.ts). The panel has no button of its own (every corner of the
-// screen is taken): in a room, the menu's Friends button opens it. Enter plays, so it is not chat.
-const p3p2 = new P3P2({ game: { id: 'cell', version: __BUILD__ }, ui: { button: false, chatKey: false } });
+// visit asks no server anything; the room's code, here and in the library, loads when a room is opened. p3p2's button
+// and panel are as they come: the button in its top-right corner (the leaderboard sits under it, index.html), the
+// panel's own Join? for an invite link, and Enter for chat in a room (Enter in the menu's name field still plays). The
+// menu's Play with friends opens the same panel (ui/friends.ts).
+const p3p2 = new P3P2({ game: { id: 'cell', version: __BUILD__ } });
 let net: Net | null = null;
 p3p2.on('room', (room) => {
   void import('./net/Net.ts').then((m) => {

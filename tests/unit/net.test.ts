@@ -188,9 +188,11 @@ interface Page {
   points: () => number;
   refusedWith: () => string;
   play(name: string): void;
+  /** Into the room (`page` does it at once unless the page starts alone). */
+  enter(): void;
 }
 
-function page(hub: Hub, name: string, seed: number, district: number, cfg: GameConfig = arcadeConfig): Page {
+function page(hub: Hub, name: string, seed: number, district: number, cfg: GameConfig = arcadeConfig, alone = false): Page {
   const world = new World(cfg, { seed });
   const camera = new Camera(cfg);
   camera.resize(1280, 720);
@@ -245,6 +247,9 @@ function page(hub: Hub, name: string, seed: number, district: number, cfg: GameC
       g.state = 'menu';
       refusedWith = message;
     },
+    joined(): void {
+      g.state = 'menu';
+    },
     spawnPoint(near: Vec3): Vec3 {
       const w = g.world;
       const dist = w.maze.district(w.maze.layout.regionAt(near));
@@ -259,12 +264,10 @@ function page(hub: Hub, name: string, seed: number, district: number, cfg: GameC
   };
   const game = g as unknown as Game;
   const net = new Net(game, P3P2_STUB);
-  const room = hub.join(name);
-  net.enter(room as unknown as Room);
-  return {
+  const p: Page = {
     game,
     net,
-    room,
+    room: null as unknown as FakeRoom,
     input,
     points: () => points,
     refusedWith: () => refusedWith,
@@ -276,7 +279,13 @@ function page(hub: Hub, name: string, seed: number, district: number, cfg: GameC
       if (!remote) game.world.spawnOrganism(game.human, game.spawnPoint(game.camera.frame.c));
       game.state = 'playing';
     },
+    enter() {
+      p.room = hub.join(name);
+      net.enter(p.room as unknown as Room);
+    },
   };
+  if (!alone) p.enter();
+  return p;
 }
 
 let now = 1000;
@@ -509,6 +518,34 @@ describe('a room', () => {
     expect(third.net.status().cells).toBeGreaterThan(0);
     expect(third.net.status().others.map((o) => o.name)).toContain('Grace');
   }, 30_000);
+
+  it('a page playing alone comes in: first, it hosts and plays on; as a guest, back to the menu, and PLAY puts it in the host’s world', () => {
+    const hub = new Hub();
+    const ada = page(hub, 'Ada', 61, 2, arcadeConfig, true);
+    ada.play('Ada');
+    const colony = ada.game.human;
+    ada.enter();
+    expect(ada.game.state).toBe('playing');
+    expect(ada.game.human).toBe(colony);
+    expect(colony.cells.length).toBeGreaterThan(0);
+
+    const grace = page(hub, 'Grace', 62, 9, arcadeConfig, true);
+    grace.play('Grace');
+    expect(grace.game.human.cells.length).toBeGreaterThan(0);
+    grace.enter();
+    expect(grace.game.state).toBe('menu');
+    run(ada, [grace], 3);
+    grace.play('Grace');
+    run(ada, [grace], 4);
+    expect(colonyOf(ada, grace).cells.length).toBeGreaterThan(0);
+    expect(grace.net.status().human?.alive).toBe(true);
+
+    // The host's role passing to Grace while Ada plays (her page went to the background, say) is no game alone: Ada
+    // plays on.
+    hub.hostId = grace.room.self.id;
+    for (const r of hub.rooms) r.emit('host-change', r.host);
+    expect(ada.game.state).toBe('playing');
+  });
 
   it('a full world refuses another colony; a colony whose page is away stays where it is, and holds no place', () => {
     const hub = new Hub();

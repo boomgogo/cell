@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { MAX_PLAYERS } from '../../src/net/Net.ts';
-import { GAME, PHONE, accept, apart, createRoom, expect, host, inRoom, join, lagProxy, play, player, status, test, why } from './p3p2.ts';
+import { GAME, PHONE, accept, apart, button, closePanel, createRoom, expect, host, inRoom, join, kick, lagProxy, onFrontPage, panel, play, player, status, test, through, why } from './p3p2.ts';
 
 interface GameHandle {
   state: string;
@@ -64,12 +64,26 @@ test('alone: nothing asks a server anything, and the room code never loads', asy
   expect(requests.filter((u) => !u.startsWith(GAME))).toEqual([]);
   expect(requests.filter((u) => /\/assets\/(Net|p3p2-core|p3p2-panel)-/.test(u))).toEqual([]);
   expect(await status(page)).toBeNull();
+
+  // p3p2's button, in play: the panel says what playing with friends takes, with p3p2.me. Its code loads; still no
+  // server is asked anything, and the room's code stays where it is.
+  await button(page).click();
+  await expect(panel(page)).toContainText('Open the invite link from the server.');
+  await expect(panel(page).getByRole('link', { name: 'p3p2.me' })).toHaveAttribute('href', 'https://p3p2.me/');
+  await expect(panel(page).getByRole('link', { name: 'p3p2.me' })).toHaveAttribute('target', '_blank');
+  await closePanel(page);
+  await expect(panel(page)).toBeHidden();
+  await page.waitForTimeout(500);
+  expect(sockets).toEqual([]);
+  expect(requests.filter((u) => !u.startsWith(GAME))).toEqual([]);
+  expect(requests.filter((u) => /\/assets\/Net-/.test(u))).toEqual([]);
+  expect(await status(page)).toBeNull();
 });
 
 test('two players: one world, starting in one district; the guest steers, eats, and is eaten', async ({ browser, p3p2 }) => {
-  const roomUrl = await createRoom(browser, p3p2, 'Friday');
+  const owner = await createRoom(browser, p3p2, 'Friday');
   const ada = await player(browser, '/?mute=1&geo=0&district=3');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   await expect(ada.page.locator('#friends')).toHaveText('Friends · 1');
   await expect(ada.page.locator('#room')).toHaveText(/In Friday · 1 player · you run this world/);
 
@@ -123,33 +137,25 @@ test('two players: one world, starting in one district; the guest steers, eats, 
   expect([...ada.errors, ...grace.errors]).toEqual([]);
 });
 
-test('one name, the menu’s: hosting and joining by it, Play alone, no name, a bad room URL, and removed', async ({ browser, p3p2 }) => {
-  const roomUrl = await createRoom(browser, p3p2, 'Names');
+test('the panel’s Join?: Play alone, no name, a name the room has, the room’s name on the menu, and removed in the portal', async ({ browser, p3p2 }) => {
+  const owner = await createRoom(browser, p3p2, 'Names');
   const ada = await player(browser, '/?mute=1&geo=0');
-  // Not a room URL: the menu says so, and there is no room.
-  await ada.page.fill('#nick', 'Ada');
-  await ada.page.click('#friends');
-  await ada.page.fill('#room-url', 'not a room');
-  await ada.page.click('#create');
-  await expect(ada.page.locator('#host-status')).toHaveText(/doesn't look like a room URL/);
-  expect(await status(ada.page)).toBeNull();
-  const invite = await host(ada.page, roomUrl, 'Ada');
-  // The panel has the invite, and Ada by the menu's name, and no name field; the menu's is the room's now.
-  await ada.page.click('#friends');
-  const panel = ada.page.getByRole('dialog', { name: 'Multiplayer' });
-  await expect(panel.locator('.members')).toHaveText(/Ada/);
-  await expect(panel.getByLabel('Your name')).toHaveCount(0);
+  const invite = await host(ada.page, owner.invite, 'Ada');
+  // The menu's name is the room's now, and can't change in it.
   await expect(ada.page.locator('#nick')).toHaveValue('Ada');
   await expect(ada.page.locator('#nick')).not.toBeEditable();
+  await ada.page.click('#friends');
+  await expect(panel(ada.page).locator('.members')).toHaveText(/Ada/);
+  await closePanel(ada.page);
 
-  // Bob opens the invite: "Join?" on the menu. Play alone plays alone, and a reload wouldn't ask again.
+  // Bob opens the invite: Join?, in the panel. Play alone plays alone, and a reload wouldn't ask again.
   const bob = await player(browser, invite);
-  await expect(bob.page.locator('#invite')).toHaveText(/^Join Names on 127\.0\.0\.1:\d+\?Hosted by Ada · 1 player$/);
-  await expect(bob.page.locator('#friends')).toBeHidden();
-  await bob.page.fill('#nick', 'Bob');
-  await bob.page.click('#alone');
-  await expect(bob.page.locator('#menu')).toBeHidden();
+  await expect(panel(bob.page)).toContainText(/Join Names on 127\.0\.0\.1:\d+\?/);
+  await expect(panel(bob.page)).toContainText('Hosted by Ada · 1 player');
+  await panel(bob.page).getByRole('button', { name: 'Play alone' }).click();
+  await expect(panel(bob.page)).toBeHidden();
   expect(new URL(bob.page.url()).searchParams.has('room')).toBe(false);
+  await play(bob.page, 'Bob');
   expect(await status(bob.page)).toBeNull();
 
   // Cat joins with no name: she is the name the room gives her, on her menu and in Ada's panel.
@@ -158,23 +164,113 @@ test('one name, the menu’s: hosting and joining by it, Play alone, no name, a 
   await expect(nick).toHaveValue(/^Player \d+$/);
   await expect(nick).not.toBeEditable();
   const catName = await nick.inputValue();
-  await expect(panel.locator('.members')).toContainText(catName);
+  await ada.page.click('#friends');
+  await expect(panel(ada.page).locator('.members')).toContainText(catName);
+  await closePanel(ada.page);
   await play(cat.page, catName);
   await expect.poll(() => colonyOnHost(ada.page, catName)).not.toBeNull();
 
-  // Ada removes her: Cat's menu says so, the panel stays shut, and the name is hers to change again.
-  await panel.getByRole('button', { name: `Remove ${catName}` }).click();
+  // Dan asks for Ada's name, in other capitals: the panel says the room has it, and Dan joins as Dan.
+  const dan = await player(browser, invite);
+  const yes = panel(dan.page).getByRole('button', { name: 'Join', exact: true });
+  await expect(yes).toBeEnabled();
+  await panel(dan.page).getByLabel('Your name').fill('ada');
+  await yes.click();
+  await expect(panel(dan.page).getByRole('status')).not.toBeEmpty();
+  expect(await status(dan.page)).toBeNull();
+  await accept(dan.page, 'Dan');
+  await expect(dan.page.locator('#nick')).toHaveValue('Dan');
+
+  // The owner removes Cat in the portal: her panel opens and says so, so does her menu, and her name is hers again.
+  await kick(owner, catName);
   await expect(cat.page.locator('#room')).toHaveText('You were removed from the room.', { timeout: 10_000 });
+  await expect(panel(cat.page)).toContainText('You were removed from the room.');
   await expect(cat.page.locator('#friends')).toHaveText('Play with friends');
-  await expect(cat.page.getByRole('dialog', { name: 'Multiplayer' })).toBeHidden();
   await expect(nick).toBeEditable();
-  expect([...ada.errors, ...bob.errors, ...cat.errors]).toEqual([]);
+  expect([...ada.errors, ...bob.errors, ...cat.errors, ...dan.errors]).toEqual([]);
+  await owner.close();
+});
+
+test('a link from the server’s front page: the panel asks for the characters it leaves out', async ({ browser, p3p2 }) => {
+  const owner = await createRoom(browser, p3p2, 'Front');
+  const { whole, shown } = await onFrontPage(owner, 4);
+  const ada = await player(browser, '/?mute=1&geo=0');
+  await host(ada.page, whole, 'Ada');
+  const grace = await player(browser, shown);
+  const chars = panel(grace.page).getByLabel('The last 4 characters');
+  await expect(chars).toBeFocused();
+  const hidden = whole.slice(-4);
+  await chars.fill((hidden[0] === '0' ? '1' : '0') + hidden.slice(1));
+  await expect(panel(grace.page).getByRole('status')).toHaveText("Those aren't the right characters.");
+  await chars.fill(hidden.toUpperCase());
+  await expect(panel(grace.page)).toContainText('Hosted by Ada · 1 player');
+  await accept(grace.page, 'Grace');
+  await play(grace.page, 'Grace');
+  await expect.poll(() => colonyOnHost(ada.page, 'Grace')).not.toBeNull();
+  expect([...ada.errors, ...grace.errors]).toEqual([]);
+  await owner.close();
+});
+
+test('Join, answered in the middle of a game alone: back to the menu, in the room, and PLAY puts the colony in the host’s world', async ({ browser, p3p2 }) => {
+  const owner = await createRoom(browser, p3p2, 'Midway');
+  const ada = await player(browser, '/?mute=1&geo=0&district=8');
+  const invite = await host(ada.page, owner.invite, 'Ada');
+  await play(ada.page, 'Ada');
+
+  // Grace plays alone first, with the panel's Join? still open, then says yes.
+  const grace = await player(browser, invite);
+  const yes = panel(grace.page).getByRole('button', { name: 'Join', exact: true });
+  await expect(yes).toBeEnabled();
+  await play(grace.page, 'Grace');
+  await expect.poll(async () => grace.page.evaluate(() => (window as unknown as W).__game.human.cells.length)).toBeGreaterThan(0);
+  await panel(grace.page).getByLabel('Your name').fill('Grace');
+  await yes.click();
+  await inRoom(grace.page, false);
+  await expect(grace.page.locator('#menu')).toBeVisible();
+  await expect(grace.page.locator('#room')).toHaveText(/2 players · Ada runs this world/);
+  expect(await colonyOnHost(ada.page, 'Grace')).toBeNull();
+  await play(grace.page, 'Grace');
+  await expect.poll(() => colonyOnHost(ada.page, 'Grace')).not.toBeNull();
+  await expect.poll(async () => (await status(grace.page))?.human?.alive).toBe(true);
+  // Ada's game went on throughout.
+  await expect(ada.page.locator('#menu')).toBeHidden();
+  expect([...ada.errors, ...grace.errors]).toEqual([]);
+  await owner.close();
+});
+
+test('chat during play: Enter opens it, what is typed there neither splits nor ejects, and the other page gets a badge', async ({ browser, p3p2 }) => {
+  const owner = await createRoom(browser, p3p2, 'Chatter');
+  const ada = await player(browser, '/?mute=1&geo=0&district=1');
+  const invite = await host(ada.page, owner.invite, 'Ada');
+  const grace = await join(browser, invite, 'Grace');
+  // On the menu, Enter in the name field still plays.
+  await ada.page.locator('#nick').focus();
+  await ada.page.keyboard.press('Enter');
+  await expect(ada.page.locator('#menu')).toBeHidden();
+  await expect.poll(async () => ada.page.evaluate(() => (window as unknown as W).__game.human.cells.length)).toBeGreaterThan(0);
+  const before = await ada.page.evaluate(() => (window as unknown as W).__game.human.cells.length);
+
+  // In play, Enter is chat.
+  await ada.page.keyboard.press('Enter');
+  await expect(panel(ada.page).getByPlaceholder('Say something…')).toBeFocused();
+  await ada.page.keyboard.type('w w hello');
+  await ada.page.keyboard.press('Enter');
+  await expect(panel(ada.page)).toBeHidden();
+  expect(await ada.page.evaluate(() => (window as unknown as W).__game.human.cells.length)).toBe(before);
+  expect(await ada.page.evaluate(() => (window as unknown as { __game: { input: { ejectHeld: boolean } } }).__game.input.ejectHeld)).toBe(false);
+
+  await expect(button(grace.page)).toHaveAccessibleName('Multiplayer, 1 unread message');
+  await expect(button(grace.page)).toContainText('1');
+  await button(grace.page).click();
+  await expect(panel(grace.page).locator('.log')).toContainText('Ada: w w hello');
+  expect([...ada.errors, ...grace.errors]).toEqual([]);
+  await owner.close();
 });
 
 test('the host leaves: the next player carries the world on, and a third plays in it', async ({ browser, p3p2 }) => {
-  const roomUrl = await createRoom(browser, p3p2, 'Carry on');
+  const owner = await createRoom(browser, p3p2, 'Carry on');
   const ada = await player(browser, '/?mute=1&geo=0&district=5');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   const grace = await join(browser, invite, 'Grace');
   await play(ada.page, 'Ada');
   await play(grace.page, 'Grace');
@@ -199,9 +295,9 @@ test('the host leaves: the next player carries the world on, and a third plays i
 });
 
 test('a reload: back in the room, and PLAY gives the same colony back', async ({ browser, p3p2 }) => {
-  const roomUrl = await createRoom(browser, p3p2, 'Reload');
+  const owner = await createRoom(browser, p3p2, 'Reload');
   const ada = await player(browser, '/?mute=1&geo=0&district=2');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   const grace = await join(browser, invite, 'Grace');
   await play(grace.page, 'Grace');
   await expect.poll(async () => (await status(grace.page))?.human?.alive).toBe(true);
@@ -223,9 +319,9 @@ test('a reload: back in the room, and PLAY gives the same colony back', async ({
 test('a bad connection: 150 ms each way and a cut, and the guest still steers', async ({ browser, p3p2 }) => {
   const proxy = await lagProxy(p3p2.url, 150);
   try {
-    const roomUrl = (await createRoom(browser, p3p2, 'Far away')).replace(`:${new URL(p3p2.url).port}/`, `:${proxy.port}/`);
+    const owner = await createRoom(browser, p3p2, 'Far away');
     const ada = await player(browser, '/?mute=1&geo=0&district=4');
-    const invite = await host(ada.page, roomUrl, 'Ada');
+    const invite = await host(ada.page, through(owner.invite, p3p2.url, `http://127.0.0.1:${proxy.port}`), 'Ada');
     const grace = await join(browser, invite, 'Grace');
     await play(grace.page, 'Grace');
     await expect.poll(async () => (await status(grace.page))?.human?.alive, { timeout: 15_000 }).toBe(true);
@@ -251,9 +347,9 @@ test('a bad connection: 150 ms each way and a cut, and the guest still steers', 
 });
 
 test('a phone: in by the invite, the panel by touch and on the screen, PLAY by touch, a finger steers', async ({ browser, p3p2 }) => {
-  const roomUrl = await createRoom(browser, p3p2, 'Pocket');
+  const owner = await createRoom(browser, p3p2, 'Pocket');
   const ada = await player(browser, '/?mute=1&geo=0&district=6');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   const phone = await player(browser, invite, PHONE);
   const vp = phone.page.viewportSize()!;
   const onScreen = async (box: { x: number; y: number; width: number; height: number } | null) => {
@@ -261,12 +357,18 @@ test('a phone: in by the invite, the panel by touch and on the screen, PLAY by t
     expect(box!.x + box!.width).toBeLessThanOrEqual(vp.width + 0.5);
     expect(box!.y + box!.height).toBeLessThanOrEqual(vp.height + 0.5);
   };
-  await expect(phone.page.locator('#invite')).toContainText('Hosted by Ada');
-  await onScreen(await phone.page.locator('#alone').boundingBox());
+  await expect(panel(phone.page)).toContainText('Hosted by Ada');
+  await onScreen(await panel(phone.page).boundingBox());
   await accept(phone.page, 'Kit', true);
   await expect(phone.page.locator('#friends')).toHaveText('Friends · 2');
   await phone.page.locator('#friends').tap();
   const dialog = phone.page.getByRole('dialog', { name: 'Multiplayer' });
+  await expect(dialog).toBeVisible();
+  await onScreen(await dialog.boundingBox());
+  await dialog.getByRole('button', { name: 'Close' }).tap();
+  await expect(dialog).toBeHidden();
+  // p3p2's button opens the same panel.
+  await button(phone.page).tap();
   await expect(dialog).toBeVisible();
   await onScreen(await dialog.boundingBox());
   await dialog.getByRole('button', { name: 'Close' }).tap();
@@ -291,9 +393,9 @@ test('a phone: in by the invite, the panel by touch and on the screen, PLAY by t
 });
 
 test('rules: a guest opened with other rules reloads into the room’s', async ({ browser, p3p2 }) => {
-  const roomUrl = await createRoom(browser, p3p2, 'Rules');
+  const owner = await createRoom(browser, p3p2, 'Rules');
   const ada = await player(browser, '/?mute=1&geo=0');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   const grace = await player(browser, `${invite}&preset=base`);
   await accept(grace.page, 'Grace');
   // The room's world has mazes: her page comes back without ?preset=base, with them.
@@ -306,9 +408,9 @@ test('rules: a guest opened with other rules reloads into the room’s', async (
 
 test('a full world: the next PLAY waits, watching costs no zone, and what hosting sends', async ({ browser, p3p2 }) => {
   test.setTimeout(120_000);
-  const roomUrl = await createRoom(browser, p3p2, 'Full house');
+  const owner = await createRoom(browser, p3p2, 'Full house');
   const ada = await player(browser, '/?mute=1&geo=0&district=0');
-  const invite = await host(ada.page, roomUrl, 'Ada');
+  const invite = await host(ada.page, owner.invite, 'Ada');
   const small = { viewport: { width: 640, height: 400 } };
   const guests = [];
   for (let i = 1; i <= MAX_PLAYERS; i++) guests.push(await join(browser, invite, `P${i}`, small));

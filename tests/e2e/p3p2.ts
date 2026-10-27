@@ -1,7 +1,7 @@
 // Friends on one machine: a p3p2 server for each test (scripts/p3p2.ts, from a p3p2 checkout), and the steps a
-// player takes through p3p2's portal, the menu (which hosts and answers invites, src/ui/friends.ts) and p3p2's panel,
-// as p3p2's own tests take them (its e2e/tests/helpers.ts).
-import { type Browser, type BrowserContext, type BrowserContextOptions, type Page, test as base, expect } from '@playwright/test';
+// player takes through p3p2's portal and p3p2's panel (its Join?, the invite link, Close), as p3p2's own tests take
+// them (its e2e/tests/helpers.ts, at 0.2).
+import { type Browser, type BrowserContext, type BrowserContextOptions, type Locator, type Page, test as base, expect } from '@playwright/test';
 import { pathToFileURL } from 'node:url';
 import { join as joinPath } from 'node:path';
 import { P3P2_DIR, type P3p2Server, missing, startP3p2 } from '../../scripts/p3p2.ts';
@@ -24,11 +24,19 @@ export const test = base.extend<{ p3p2: P3p2Server }>({
   },
 });
 
-/** Logs in to the portal and creates a room for the tests' game; returns its room URL. */
-export async function createRoom(browser: Browser, server: P3p2Server, name: string, players?: number): Promise<string> {
+/** A room, from its owner's side: its page in the portal, and the invite link everybody joins it with. */
+export interface Owner {
+  portal: Page;
+  invite: string;
+  close(): Promise<void>;
+}
+
+/** Logs in to the portal and creates a room for the tests' game. `players`: how many may join, if not the default. */
+export async function createRoom(browser: Browser, server: P3p2Server, name: string, players?: number): Promise<Owner> {
   const context = await browser.newContext();
   const portal = await context.newPage();
-  await portal.goto(`${server.url}/`);
+  // Not the server's address: once a room is on its front page, that is the front page.
+  await portal.goto(`${server.url}/login`);
   await portal.getByLabel('Password').fill(server.password);
   await portal.getByRole('button', { name: 'Log in' }).click();
   await portal.getByLabel('Game URL').fill(GAME);
@@ -36,9 +44,37 @@ export async function createRoom(browser: Browser, server: P3p2Server, name: str
   if (players !== undefined) await portal.getByLabel('Most players').fill(String(players));
   await portal.getByRole('button', { name: 'Create room' }).click();
   await expect(portal.getByRole('heading', { name })).toBeVisible();
-  const roomUrl = await portal.getByLabel('Room URL').inputValue();
-  await context.close();
-  return roomUrl;
+  return { portal, invite: await portal.getByLabel('Invite link', { exact: true }).inputValue(), close: () => context.close() };
+}
+
+/**
+ * Puts the room on the server's front page, its link without the last `hidden` characters. That makes a new invite:
+ * returns the link whole, and as the front page shows it, a dash for each character left out.
+ */
+export async function onFrontPage(owner: Owner, hidden: number): Promise<{ whole: string; shown: string }> {
+  await owner.portal.getByLabel("On this server's front page").selectOption(String(hidden));
+  await owner.portal.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(owner.portal.locator('b.mono')).toHaveText(new RegExp(`^[0-9a-z]{${hidden}}$`));
+  const whole = await owner.portal.getByLabel('Invite link', { exact: true }).inputValue();
+  return { whole, shown: whole.slice(0, -hidden) + '-'.repeat(hidden) };
+}
+
+/** The owner removes a player, on the room's page in the portal. */
+export async function kick(owner: Owner, name: string): Promise<void> {
+  await owner.portal.reload();
+  await owner.portal.getByRole('listitem').filter({ hasText: name }).getByRole('button', { name: 'Kick' }).click();
+}
+
+/** An invite link that goes through another address of its server, such as a lag proxy in front of it. */
+export function through(invite: string, server: string, other: string): string {
+  return invite.replace(`=${server}/`, `=${other}/`);
+}
+
+/** The invite of `invite` on the page at `url`, with that page's own parameters (`?district=`, `?mute=`, …). */
+export function withInvite(url: string, invite: string): string {
+  const u = new URL(url, GAME);
+  u.searchParams.set('room', new URL(invite).searchParams.get('room')!);
+  return u.toString();
 }
 
 export interface Player {
@@ -61,29 +97,40 @@ export async function player(browser: Browser, url: string, options: BrowserCont
   return { page, context, errors };
 }
 
-/** A name on the menu, then "Play with friends" with the room URL; returns the invite link the panel shows to send. */
-export async function host(page: Page, roomUrl: string, name: string): Promise<string> {
-  await page.fill('#nick', name);
-  if (await page.locator('#host-form').isHidden()) await page.locator('#friends').click();
-  await page.fill('#room-url', roomUrl);
-  await page.click('#create');
-  const link = page.getByLabel('Invite link', { exact: true });
-  await expect(link).toBeVisible();
-  const invite = await link.inputValue();
-  await inRoom(page, true);
-  await closePanel(page);
-  return invite;
+/** p3p2's panel, open: a Join?, or the room. */
+export function panel(page: Page): Locator {
+  return page.getByRole('dialog', { name: 'Multiplayer' });
 }
 
-/** A name on the menu, and yes to "Join?" on a page opened from an invite. */
-export async function accept(page: Page, name: string, tap = false): Promise<void> {
-  const join = page.locator('#play');
-  await expect(join).toHaveText('Join');
+/** p3p2's button, in the corner. */
+export function button(page: Page): Locator {
+  return page.locator('p3p2-panel').getByRole('button', { name: /^Multiplayer/ });
+}
+
+/**
+ * The first one in, who hosts: opens the room's invite on this page and says yes to the panel's Join? with a name.
+ * Returns the invite link the panel shows to pass on (with this page's parameters, as p3p2 makes it).
+ */
+export async function host(page: Page, invite: string, name: string): Promise<string> {
+  await page.goto(withInvite(page.url(), invite));
+  await page.waitForFunction(() => (window as unknown as { __game?: { world: { tick: number } } }).__game?.world.tick! > 5);
+  await accept(page, name, false, true);
+  await page.locator('#friends').click();
+  const link = panel(page).getByLabel('Invite link', { exact: true });
+  await expect(link).toBeVisible();
+  const shared = await link.inputValue();
+  await closePanel(page);
+  return shared;
+}
+
+/** Yes to the panel's Join? on a page opened from an invite, with a name ('' for none: the room gives one). */
+export async function accept(page: Page, name: string, tap = false, asHost = false): Promise<void> {
+  const join = panel(page).getByRole('button', { name: 'Join', exact: true });
   await expect(join).toBeEnabled();
-  await page.fill('#nick', name);
+  await panel(page).getByLabel('Your name').fill(name);
   if (tap) await join.tap();
   else await join.click();
-  await inRoom(page, false);
+  await inRoom(page, asHost);
 }
 
 /** Opens an invite and says yes. */
@@ -94,7 +141,7 @@ export async function join(browser: Browser, invite: string, name: string, optio
 }
 
 export async function closePanel(page: Page): Promise<void> {
-  const close = page.getByRole('dialog', { name: 'Multiplayer' }).getByRole('button', { name: 'Close' });
+  const close = panel(page).getByRole('button', { name: 'Close' });
   if (await close.isVisible()) await close.click();
 }
 

@@ -298,6 +298,11 @@ function install(cfg: RecConfig) {
   const hook = (g: GameLike) => {
     hooked = true;
     if (cfg.dry) g.renderer.render = () => {};
+    // p3p2's button is for playing with friends, which a run never does: hidden, dry or recorded, with the leaderboard
+    // back at the top, so a run looks as it did before the button came, and the hands find the screen as they did.
+    const style = document.createElement('style');
+    style.textContent = 'p3p2-panel { display: none; } #leaderboard { top: max(12px, env(safe-area-inset-top)); }';
+    document.head.append(style);
     const w = g.world;
     const step = w.step.bind(w);
     w.step = () => {
